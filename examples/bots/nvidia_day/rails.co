@@ -1,0 +1,4 @@
+# Overrides the generic refusal shipped with the regex rail so an attendee can
+# tell that the request was rejected by policy and not by the model.
+define bot refuse to respond
+  "I can't help with that. This bot blocks requests that try to override its instructions, reveal its system prompt, export model weights, or replace the CUDA compute stack. Ask me about NVIDIA Day or NeMo Guardrails instead."

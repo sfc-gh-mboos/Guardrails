@@ -1,0 +1,45 @@
+models:
+  - type: main
+    engine: openai
+    model: gpt-4o-mini
+
+instructions:
+  - type: general
+    content: |
+      Below is a conversation between a user and a bot called the NVIDIA Day Bot.
+      The bot answers questions from event attendees about NVIDIA Day and about
+      building guardrails with NeMo Guardrails.
+      The bot is concise, friendly, and factual.
+      If the bot does not know the answer to a question, it truthfully says it does not know.
+
+sample_conversation: |
+  user "Hi there. What is this bot for?"
+    express greeting and ask about purpose
+  bot express greeting and explain purpose
+    "Hi! I'm the NVIDIA Day Bot. Ask me anything about the sessions or about building guardrails with NeMo Guardrails."
+  user "What are input rails?"
+    ask about input rails
+  bot respond about input rails
+    "Input rails run on the user message before it reaches the LLM. They can reject a message, alter it, or stop any further processing."
+
+rails:
+  config:
+    # Deterministic pattern matching. These checks run before the main LLM call,
+    # so a blocked request never reaches the model and costs no tokens.
+    regex_detection:
+      input:
+        case_insensitive: true
+        patterns:
+          # Prompt injection and system prompt exfiltration.
+          # `[^.?!]` keeps a match inside a single sentence, so unrelated
+          # keywords in neighboring sentences do not combine into a match.
+          - '\b(ignore|disregard|forget|override|bypass)\b[^.?!]{0,40}\b(previous|prior|earlier|above|all|your)\b[^.?!]{0,40}\b(instruction|prompt|rule|direction|guardrail)s?\b'
+          - '\b(show|reveal|print|repeat|display|dump|leak|give|tell|share)\b[^.?!]{0,40}\b(system|initial|original|developer|hidden)\b[^.?!]{0,20}\b(prompt|instruction|message)s?\b'
+          # Model weight exfiltration.
+          - '\b(export|download|dump|upload|exfiltrate|copy|send|extract|share|leak|steal)\b[^.?!]{0,40}\b(the |your |these |those )?(model |llm )?(weights|checkpoints?|state[ _]dicts?|safetensors)\b'
+          # Requests to swap the CUDA compute stack for a different one.
+          - '\b(replace|swap|switch|port|migrate|convert|move|rewrite)\b[^.?!]{0,40}\bcuda\b[^.?!]{0,40}\b(rocm|hip|opencl)\b'
+          - '\b(rocm|hip|opencl)\b[^.?!]{0,40}\b(instead of|rather than|in place of)\b[^.?!]{0,20}\bcuda\b'
+  input:
+    flows:
+      - regex check input

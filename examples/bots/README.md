@@ -4,3 +4,4 @@ The examples in this folder showcase various configurations of guardrails. You c
 
 1. [Hello World](./hello_world): basic starter configuration.
 2. [ABC Bot](./abc): more advanced configuration using topical rails, input and output moderation and retrieval augmented generation, etc.
+3. [NVIDIA Day Bot](./nvidia_day): deterministic input rails that block prompt injection, model weight exfiltration and compute stack swaps before the LLM is called.
