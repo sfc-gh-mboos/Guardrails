@@ -59,9 +59,9 @@ _LLMRAILS_ONLY_INPUT_REASON = (
     "'mask pii on retrieval' has no surface named 'mask pii on retrieval' with direction "
     "INPUT in the rail catalog; it is available with direction RETRIEVAL"
 )
-_LLMRAILS_ONLY_OUTPUT_FLOW = "self check facts"
+_LLMRAILS_ONLY_OUTPUT_FLOW = "autoalign groundedness output"
 _LLMRAILS_ONLY_OUTPUT_REASON = (
-    "'self check facts' needs retrieval evidence, which manifest-driven execution does not supply yet"
+    "'autoalign groundedness output' needs retrieval evidence, which manifest-driven execution does not supply yet"
 )
 
 

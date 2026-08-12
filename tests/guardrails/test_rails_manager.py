@@ -1215,9 +1215,12 @@ class TestTransformHelpers:
 
         merged = _merge_transforms(first, second)
 
-        assert merged == RailOutcome.transform(
-            [(TransformTarget.USER_MESSAGE, "two"), (TransformTarget.BOT_MESSAGE, "bot")]
-        ).transforms
+        assert (
+            merged
+            == RailOutcome.transform(
+                [(TransformTarget.USER_MESSAGE, "two"), (TransformTarget.BOT_MESSAGE, "bot")]
+            ).transforms
+        )
 
 
 class TestRailCallRecordNaming:

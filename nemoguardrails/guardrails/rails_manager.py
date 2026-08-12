@@ -166,9 +166,7 @@ _TRANSFORM_TARGET_ORDER = (
 )
 
 
-def _merge_transforms(
-    existing: tuple[TransformSpec, ...], new: tuple[TransformSpec, ...]
-) -> tuple[TransformSpec, ...]:
+def _merge_transforms(existing: tuple[TransformSpec, ...], new: tuple[TransformSpec, ...]) -> tuple[TransformSpec, ...]:
     """Combine rewrites with last-wins per target, in a stable target order."""
     by_target = {spec.target: spec for spec in existing}
     for spec in new:
@@ -425,9 +423,7 @@ class RailsManager:
                 flow: self._run_rail(flow, RailDirection.OUTPUT, messages, bot_response=response) for flow in active
             }
             return await self._run_rails_parallel(rails, RailDirection.OUTPUT)
-        return await self._run_content_rails_sequential(
-            active, RailDirection.OUTPUT, messages, bot_response=response
-        )
+        return await self._run_content_rails_sequential(active, RailDirection.OUTPUT, messages, bot_response=response)
 
     async def are_tool_calls_safe(
         self,

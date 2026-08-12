@@ -397,9 +397,7 @@ class TestLocalInjectionDetectionTransformAcrossEngines:
         expected = "This is a  * FROM usersmalicious comment in the middle of text"
 
         llmrails = TestChat(RailsConfig.from_content(config=config_dict), llm_completions=[sql_injection])
-        llmrails_response = await llmrails.app.generate_async(
-            messages=[{"role": "user", "content": "do a fake query"}]
-        )
+        llmrails_response = await llmrails.app.generate_async(messages=[{"role": "user", "content": "do a fake query"}])
 
         with patch.dict(os.environ, {"NVIDIA_API_KEY": "test-key"}):
             iorails = IORails(RailsConfig.from_content(config=config_dict))
