@@ -42,6 +42,7 @@ from nemoguardrails.library.content_safety.actions import (
     content_safety_check_output,
 )
 from nemoguardrails.library.jailbreak_detection.actions import jailbreak_detection_model
+from nemoguardrails.library.sensitive_data_detection.actions import mask_sensitive_data
 from nemoguardrails.library.topic_safety.actions import topic_safety_check_input
 from nemoguardrails.logging.explain import LLMCallInfo
 from nemoguardrails.logging.processing_log import processing_log_var
@@ -73,6 +74,8 @@ CONTENT_SAFETY_ACTION_REF = ActionRef(
 EXECUTABLE_SURFACES = {
     "content safety check input",
     "content safety check output",
+    "mask sensitive data on input",
+    "mask sensitive data on output",
     "topic safety check input",
     "jailbreak detection model",
 }
@@ -261,14 +264,10 @@ class TestCompilation:
         with pytest.raises(RailCompilationError, match="model_name"):
             compile_rail(CONTENT_SAFETY_INPUT, RailDirection.INPUT, deps)
 
-    def test_context_binding_surfaces_do_not_compile(self, deps):
-        """A surface using a context binding is refused rather than silently misbehaving.
-
-        Context bindings name a specific action parameter (``user_message`` into ``text``),
-        which request-time injection does not fill.
-        """
+    def test_unavailable_context_binding_surfaces_do_not_compile(self, deps):
+        """A context binding IORails cannot source is refused rather than silently omitted."""
         with pytest.raises(RailCompilationError, match="context binding"):
-            compile_rail("detect pii on input", RailDirection.INPUT, deps)
+            compile_rail("detect sensitive data on retrieval", RailDirection.RETRIEVAL, deps)
 
     def test_an_action_with_a_kwargs_catch_all_accepts_any_binding(self, deps, monkeypatch):
         """A ``**kwargs`` action is not refused, because it genuinely accepts the keyword.
@@ -454,6 +453,30 @@ class TestBindingResolution:
         await compile_rail(CONTENT_SAFETY_INPUT, RailDirection.INPUT, deps).run(USER_MESSAGES)
 
         assert content_safety_action.kwargs["context"]["user_message"] == "hello there"
+
+    @pytest.mark.asyncio
+    async def test_context_binding_supplies_the_current_user_message(self, deps, monkeypatch):
+        """A manifest context binding resolves user_message into the action's text parameter."""
+        action = RecordingAction(signature_of=mask_sensitive_data)
+        monkeypatch.setattr("nemoguardrails.library.sensitive_data_detection.actions.mask_sensitive_data", action)
+
+        await compile_rail("mask sensitive data on input", RailDirection.INPUT, deps).run(USER_MESSAGES)
+
+        assert action.kwargs["source"] == "input"
+        assert action.kwargs["text"] == "hello there"
+
+    @pytest.mark.asyncio
+    async def test_context_binding_supplies_the_generated_bot_message(self, deps, monkeypatch):
+        """An output mask receives the generated response through its text binding."""
+        action = RecordingAction(signature_of=mask_sensitive_data)
+        monkeypatch.setattr("nemoguardrails.library.sensitive_data_detection.actions.mask_sensitive_data", action)
+
+        await compile_rail("mask sensitive data on output", RailDirection.OUTPUT, deps).run(
+            USER_MESSAGES, bot_response="the reply"
+        )
+
+        assert action.kwargs["source"] == "output"
+        assert action.kwargs["text"] == "the reply"
 
     @pytest.mark.asyncio
     async def test_literal_binding_supplies_a_constant(self, deps, content_safety_action):

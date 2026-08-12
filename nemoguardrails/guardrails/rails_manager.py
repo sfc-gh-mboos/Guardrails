@@ -21,7 +21,7 @@ from collections.abc import Coroutine, Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Optional, TypeVar, Union
 
-from nemoguardrails.actions.rail_outcome import RailOutcome
+from nemoguardrails.actions.rail_outcome import RailOutcome, TransformSpec
 from nemoguardrails.guardrails.actions.tool_call_action import ToolCallRailAction
 from nemoguardrails.guardrails.actions.tool_result_action import ToolResultRailAction
 from nemoguardrails.guardrails.compiled_rail import CompiledRail, RailDependencies, compile_rail
@@ -147,13 +147,14 @@ _HTTP_CLIENT_SURFACE_NAMES: frozenset[str] = frozenset(
 
 def _rail_result(outcome: RailOutcome) -> RailResult:
     """Map an engine-neutral rail verdict onto IORails' rail result."""
-    if outcome.is_transform:
-        # Unreachable: transform surfaces are refused at compile time until IORails can apply a
-        # rewrite. Raising keeps it that way, because the alternative -- reading TRANSFORM as
-        # "not blocked" -- allows the request and discards the rewrite with nothing to see.
-        raise NotImplementedError(f"rail returned {outcome.decision.value!r}, which IORails cannot apply")
     allowed = not outcome.is_blocked
-    return RailResult(is_safe=allowed, reason=outcome.reason, return_value={"allowed": allowed, **outcome.metadata})
+    metadata = {} if outcome.is_transform else outcome.metadata
+    return RailResult(
+        is_safe=allowed,
+        reason=outcome.reason,
+        return_value={"allowed": allowed, **metadata},
+        transforms=outcome.transforms,
+    )
 
 
 def _model_free_record(flow: str, rail_type: str, result: RailResult) -> RailCallRecord:
@@ -270,6 +271,24 @@ class RailsManager:
             self.tool_result_flows,
             self.input_parallel,
             self.output_parallel,
+        )
+
+    @property
+    def has_input_transforms(self) -> bool:
+        """Whether any configured input rail can rewrite the user message."""
+        return any(
+            rail.surface.transform_target is not None
+            for (direction, _), rail in self._rails.items()
+            if direction is RailDirection.INPUT
+        )
+
+    @property
+    def has_output_transforms(self) -> bool:
+        """Whether any configured output rail can rewrite the bot message."""
+        return any(
+            rail.surface.transform_target is not None
+            for (direction, _), rail in self._rails.items()
+            if direction is RailDirection.OUTPUT
         )
 
     def _rail_dependencies(self) -> RailDependencies:
@@ -505,15 +524,17 @@ class RailsManager:
         req_id = get_request_id()
         remaining = iter(rails.items())
         collected: list[RailCallRecord] = []
+        transforms: list[TransformSpec] = []
         try:
             for flow, coro in remaining:
                 result = await coro
                 collected.extend(result.records)
+                transforms.extend(result.transforms)
                 log.debug("[%s] %s flow %s result %s", req_id, direction.value, flow, result)
                 if not result.is_safe:
                     log.info("[%s] %s flow %s blocked", req_id, direction.value, flow)
                     return replace(result, records=tuple(collected))
-            return RailResult(is_safe=True, records=tuple(collected))
+            return RailResult(is_safe=True, records=tuple(collected), transforms=tuple(transforms))
         finally:
             for _, coro in remaining:
                 coro.close()
@@ -532,6 +553,7 @@ class RailsManager:
         task_order = {task: i for i, task in enumerate(tasks)}
         pending_tasks: set[asyncio.Task] = set(tasks)
         collected: list[RailCallRecord] = []
+        transforms_by_order: dict[int, tuple[TransformSpec, ...]] = {}
 
         try:
             while pending_tasks:
@@ -540,6 +562,7 @@ class RailsManager:
                 for task in sorted(done, key=lambda t: task_order[t]):
                     result = task.result()
                     collected.extend(result.records)
+                    transforms_by_order[task_order[task]] = result.transforms
                     flow = task_to_flow[task]
                     log.debug("[%s] %s flow %s result %s", req_id, direction.value, flow, result)
                     if not result.is_safe and first_unsafe is None:
@@ -552,7 +575,10 @@ class RailsManager:
                             t.cancel()
                         await asyncio.wait(pending_tasks)
                     return replace(first_unsafe, records=tuple(collected))
-            return RailResult(is_safe=True, records=tuple(collected))
+            transforms = tuple(
+                transform for index in sorted(transforms_by_order) for transform in transforms_by_order[index]
+            )
+            return RailResult(is_safe=True, records=tuple(collected), transforms=transforms)
         except BaseException:
             for t in tasks:
                 if not t.done():

@@ -152,7 +152,8 @@ class _BoundParameter:
     """One action parameter and the value the manifest says fills it."""
 
     action_param: str
-    value: Any
+    value: Any = None
+    context_key: Optional[str] = None
 
 
 class CompiledRail:
@@ -213,13 +214,12 @@ class CompiledRail:
 
     def _call_kwargs(self, messages: LLMMessages, bot_response: Optional[str]) -> dict[str, Any]:
         """Assemble the action's arguments from its declared parameters and the manifest."""
-        kwargs = {
-            name: value
-            for name, value in self._request_dependencies(messages, bot_response).items()
-            if name in self._accepted
-        }
+        dependencies = self._request_dependencies(messages, bot_response)
+        kwargs = {name: value for name, value in dependencies.items() if name in self._accepted}
         for bound in self._bound:
-            kwargs[bound.action_param] = bound.value
+            kwargs[bound.action_param] = (
+                dependencies["context"][bound.context_key] if bound.context_key is not None else bound.value
+            )
         return kwargs
 
     def _request_dependencies(self, messages: LLMMessages, bot_response: Optional[str]) -> dict[str, Any]:
@@ -305,17 +305,28 @@ def _bind_parameters(surface: RailSurface, params: Mapping[str, str], flow: str)
                 raise RailCompilationError(f"{flow!r} is missing required parameter ${key}=")
             continue
 
-        # Context bindings are refused by _unfillable_bindings_reason before this
-        # point. Raise here for noisy visibility
+        if binding.kind == "context" and key in _IORAILS_CONTEXT_KEYS:
+            bound.append(_BoundParameter(binding.action_param, context_key=key))
+            continue
+
         raise RailCompilationError(
             f"{flow!r} declares an unsupported {binding.kind!r} binding for {binding.action_param!r}"
         )
     return tuple(bound)
 
 
+_IORAILS_CONTEXT_KEYS = frozenset({"user_message", "bot_message"})
+
+
 def _unfillable_bindings_reason(surface: RailSurface) -> Optional[str]:
     """Report a binding kind request-time injection cannot fill."""
-    unfillable = sorted({binding.action_param for binding in surface.bindings if binding.kind == "context"})
+    unfillable = sorted(
+        {
+            binding.action_param
+            for binding in surface.bindings
+            if binding.kind == "context" and binding.key not in _IORAILS_CONTEXT_KEYS
+        }
+    )
     if not unfillable:
         return None
     return (
@@ -324,9 +335,19 @@ def _unfillable_bindings_reason(surface: RailSurface) -> Optional[str]:
     )
 
 
+_IORAILS_TRANSFORM_SURFACES: frozenset[tuple[RailDirection, str]] = frozenset(
+    {
+        (RailDirection.INPUT, "mask sensitive data on input"),
+        (RailDirection.OUTPUT, "mask sensitive data on output"),
+    }
+)
+
+
 def _transform_target_reason(surface: RailSurface) -> Optional[str]:
-    """Report a surface that rewrites content, which IORails cannot apply yet."""
+    """Report a transform surface outside the transform tier IORails supports."""
     if surface.transform_target is None:
+        return None
+    if (surface.direction, surface.name) in _IORAILS_TRANSFORM_SURFACES:
         return None
     return f"transforms {surface.transform_target.value!r}"
 
@@ -354,8 +375,7 @@ def _retrieval_context_reason(surface: RailSurface) -> Optional[str]:
     return "needs retrieval evidence, which manifest-driven execution does not supply yet"
 
 
-# Ordered so the cheapest, most structural check reports first. Each entry is removed by the
-# work that lifts its limitation: context bindings in PR 4, transforms in PR 5.
+# Ordered so the cheapest, most structural check reports first.
 _SURFACE_SUPPORT_CHECKS: tuple[Callable[[RailSurface], Optional[str]], ...] = (
     _transform_target_reason,
     _unfillable_bindings_reason,

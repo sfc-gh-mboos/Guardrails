@@ -27,6 +27,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import pytest_asyncio
 
+from nemoguardrails.actions.rail_outcome import RailOutcome, TransformTarget
 from nemoguardrails.guardrails.guardrails_types import RailResult
 from nemoguardrails.guardrails.iorails import (
     REFUSAL_MESSAGE,
@@ -94,6 +95,17 @@ class TestCheckAsyncAutoDetect:
         iorails.rails_manager.is_output_safe.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_input_transform_returns_rewritten_content(self, iorails):
+        """A passing input transform is visible in the check result."""
+        outcome = RailOutcome.transform([(TransformTarget.USER_MESSAGE, "masked input")])
+        _mock_rails(iorails, input_result=RailResult(is_safe=True, transforms=outcome.transforms))
+
+        result = await iorails.check_async([{"role": "user", "content": "original input"}])
+
+        assert result.status == RailStatus.PASSED
+        assert result.content == "masked input"
+
+    @pytest.mark.asyncio
     async def test_input_blocked(self, iorails):
         """An unsafe input verdict returns BLOCKED with the refusal message and the blocking rail name."""
         _mock_rails(iorails, input_result=_unsafe("content safety check input"))
@@ -118,6 +130,17 @@ class TestCheckAsyncAutoDetect:
         assert result.rail is None
         iorails.rails_manager.is_output_safe.assert_awaited_once_with(messages, "hi there")
         iorails.rails_manager.is_input_safe.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_output_transform_returns_rewritten_content(self, iorails):
+        """A passing output transform is visible in the check result."""
+        outcome = RailOutcome.transform([(TransformTarget.BOT_MESSAGE, "masked output")])
+        _mock_rails(iorails, output_result=RailResult(is_safe=True, transforms=outcome.transforms))
+
+        result = await iorails.check_async([{"role": "assistant", "content": "original output"}])
+
+        assert result.status == RailStatus.PASSED
+        assert result.content == "masked output"
 
     @pytest.mark.asyncio
     async def test_output_blocked(self, iorails):

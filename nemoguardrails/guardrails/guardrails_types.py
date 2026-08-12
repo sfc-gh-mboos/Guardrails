@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional, TypeAlias
 
+from nemoguardrails.actions.rail_outcome import TransformSpec
 from nemoguardrails.types import LLMResponse, UsageInfo
 
 # LLMMessage can contain role/content, plus optional tool_calls / tool_call_id / name; content may be None
@@ -74,10 +75,9 @@ class RailResult:
     structured verdict (e.g. ``{"allowed": ..., "policy_violations": [...]}``) when the
     action supplies one, used as the log's ``ExecutedAction.return_value``.
 
-    ``records`` and ``return_value`` are log-capture metadata, not part of the safety
-    verdict, so they are excluded from equality and hashing (``compare=False``) — two
-    results with the same ``is_safe``/``reason``/``triggered_rail`` compare equal
-    regardless of captured log data.
+    ``transforms`` carries rewrites for IORails to apply after a safe check. ``records``,
+    ``return_value``, and ``transforms`` are execution metadata rather than part of the
+    safety verdict, so they are excluded from equality and hashing (``compare=False``).
     """
 
     is_safe: bool
@@ -85,6 +85,7 @@ class RailResult:
     triggered_rail: str | None = None
     records: tuple[RailCallRecord, ...] = field(default=(), compare=False)
     return_value: Any = field(default=None, compare=False)
+    transforms: tuple[TransformSpec, ...] = field(default=(), compare=False)
 
 
 @dataclass(frozen=True, slots=True)

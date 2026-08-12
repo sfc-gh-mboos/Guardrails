@@ -23,6 +23,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import pytest_asyncio
 
+from nemoguardrails.actions.rail_outcome import RailOutcome, TransformTarget
 from nemoguardrails.exceptions import StreamingNotSupportedError
 from nemoguardrails.guardrails.guardrails_types import RailResult
 from nemoguardrails.guardrails.iorails import (
@@ -174,6 +175,59 @@ class TestStreamAsyncValidation:
         _wire_mocks(iorails_stream_first)
         chunks = await _collect(iorails_stream_first.stream_async(messages=[{"role": "user", "content": "hi"}]))
         assert len(chunks) > 0
+
+    @pytest.mark.asyncio
+    async def test_input_transform_reaches_stream_and_output_rails(self, iorails_stream_first):
+        """Streaming downstream consumers use the masked request without mutating the caller."""
+        outcome = RailOutcome.transform([(TransformTarget.USER_MESSAGE, "masked input")])
+        iorails_stream_first.rails_manager.is_input_safe = AsyncMock(
+            return_value=RailResult(is_safe=True, transforms=outcome.transforms)
+        )
+        iorails_stream_first.rails_manager.is_output_safe = AsyncMock(return_value=RailResult(is_safe=True))
+        streamed_messages = []
+
+        async def capturing_stream(model_type, messages, **kwargs):
+            streamed_messages.append(messages)
+            yield LLMResponseChunk(delta_content="safe reply")
+
+        iorails_stream_first.engine_registry.stream_model_call = capturing_stream
+        messages = [{"role": "user", "content": "original input"}]
+
+        await _collect(iorails_stream_first.stream_async(messages=messages))
+
+        masked_messages = [{"role": "user", "content": "masked input"}]
+        assert streamed_messages == [masked_messages]
+        assert iorails_stream_first.rails_manager.is_output_safe.await_count > 0
+        assert all(
+            call.args[0] == masked_messages
+            for call in iorails_stream_first.rails_manager.is_output_safe.await_args_list
+        )
+        assert messages == [{"role": "user", "content": "original input"}]
+
+    @pytest.mark.asyncio
+    async def test_output_transform_rails_reject_streaming(self):
+        """Output rewrites require a complete response and cannot run chunk-by-chunk."""
+        config = RailsConfig.from_content(
+            config={
+                "models": [{"type": "main", "engine": "nim", "model": "test-model"}],
+                "rails": {
+                    "config": {
+                        "sensitive_data_detection": {
+                            "output": {"entities": ["PHONE_NUMBER"]},
+                        }
+                    },
+                    "output": {
+                        "flows": ["mask sensitive data on output"],
+                        "streaming": {"enabled": True},
+                    },
+                },
+            }
+        )
+        with patch.dict("os.environ", {"NVIDIA_API_KEY": "test-key"}):
+            engine = IORails(config)
+
+        with pytest.raises(StreamingNotSupportedError, match="output transform rails"):
+            engine.stream_async(messages=[{"role": "user", "content": "hi"}])
 
     @pytest.mark.asyncio
     async def test_raises_when_include_metadata_with_output_rails_streaming(self, iorails_stream_first):
