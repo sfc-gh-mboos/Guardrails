@@ -466,6 +466,19 @@ class TestBindingResolution:
         assert action.kwargs["text"] == "hello there"
 
     @pytest.mark.asyncio
+    async def test_context_binding_supplies_the_generated_bot_message(self, deps, monkeypatch):
+        """An output mask receives the generated response through its text binding."""
+        action = RecordingAction(signature_of=mask_sensitive_data)
+        monkeypatch.setattr("nemoguardrails.library.sensitive_data_detection.actions.mask_sensitive_data", action)
+
+        await compile_rail("mask sensitive data on output", RailDirection.OUTPUT, deps).run(
+            USER_MESSAGES, bot_response="the reply"
+        )
+
+        assert action.kwargs["source"] == "output"
+        assert action.kwargs["text"] == "the reply"
+
+    @pytest.mark.asyncio
     async def test_literal_binding_supplies_a_constant(self, deps, content_safety_action):
         """A literal binding reaches the action as the value baked into the manifest.
 

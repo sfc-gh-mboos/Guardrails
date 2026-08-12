@@ -362,6 +362,24 @@ class TestGenerateAsync:
             await iorails.generate_async(messages=[{"role": "user", "content": "hi"}])
 
     @pytest.mark.asyncio
+    async def test_input_transform_is_used_by_main_and_output_rails(self, iorails):
+        """Downstream model and output checks share the rewritten conversation."""
+        outcome = RailOutcome.transform([(TransformTarget.USER_MESSAGE, "masked input")])
+        iorails.rails_manager.is_input_safe = AsyncMock(
+            return_value=RailResult(is_safe=True, transforms=outcome.transforms)
+        )
+        iorails.engine_registry.model_call = AsyncMock(return_value=LLMResponse(content="response"))
+        iorails.rails_manager.is_output_safe = AsyncMock(return_value=RailResult(is_safe=True))
+        messages = [{"role": "user", "content": "original input"}]
+
+        await iorails.generate_async(messages=messages)
+
+        masked_messages = [{"role": "user", "content": "masked input"}]
+        iorails.engine_registry.model_call.assert_awaited_once_with("main", masked_messages)
+        iorails.rails_manager.is_output_safe.assert_awaited_once_with(masked_messages, "response", enabled=True)
+        assert messages == [{"role": "user", "content": "original input"}]
+
+    @pytest.mark.asyncio
     @patch.dict("os.environ", {"NVIDIA_API_KEY": "test-key"})
     async def test_sensitive_data_masks_rewrite_input_and_output_end_to_end(self, monkeypatch):
         """Catalog mask outcomes rewrite the main-model prompt and returned assistant text."""

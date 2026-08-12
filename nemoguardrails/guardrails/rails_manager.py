@@ -148,10 +148,11 @@ _HTTP_CLIENT_SURFACE_NAMES: frozenset[str] = frozenset(
 def _rail_result(outcome: RailOutcome) -> RailResult:
     """Map an engine-neutral rail verdict onto IORails' rail result."""
     allowed = not outcome.is_blocked
+    metadata = {} if outcome.is_transform else outcome.metadata
     return RailResult(
         is_safe=allowed,
         reason=outcome.reason,
-        return_value={"allowed": allowed, **outcome.metadata},
+        return_value={"allowed": allowed, **metadata},
         transforms=outcome.transforms,
     )
 

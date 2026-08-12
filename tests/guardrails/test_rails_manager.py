@@ -1140,7 +1140,10 @@ class TestOutcomeToResult:
 
     def test_a_transform_becomes_a_safe_verdict_with_rewrite_payload(self):
         """A rewrite remains attached to the safe verdict for IORails to apply."""
-        outcome = RailOutcome.transform([(TransformTarget.USER_MESSAGE, "masked")])
+        outcome = RailOutcome.transform(
+            [(TransformTarget.USER_MESSAGE, "masked")],
+            metadata={"text": "original secret", "masked_text": "masked"},
+        )
 
         result = _rail_result(outcome)
 

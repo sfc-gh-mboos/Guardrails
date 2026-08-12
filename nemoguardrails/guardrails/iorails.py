@@ -998,16 +998,17 @@ class IORails(BaseGuardrails):
             return _blocked_return()
 
         if self._speculative_generation:
-            response = await self._do_generate_speculative(
+            generation = await self._do_generate_speculative(
                 messages, req_id, llm_kwargs, request_span, input_enabled=input_enabled, records_out=records
             )
         else:
-            response = await self._do_generate_sequential(
+            generation = await self._do_generate_sequential(
                 messages, req_id, llm_kwargs, input_enabled=input_enabled, records_out=records
             )
 
-        if response is None:
+        if generation is None:
             return _blocked_return()
+        response, rail_messages = generation
 
         # Log raw content before reasoning extraction and think-token removal
         log.debug("[%s] Raw LLM response: %s", req_id, truncate(response.content))
@@ -1039,7 +1040,9 @@ class IORails(BaseGuardrails):
         is_tool_call_only = bool(response.tool_calls) and not response_text
         if not is_tool_call_only:
             log.info("[%s] Running output rails", req_id)
-            output_result = await self.rails_manager.is_output_safe(messages, response_text, enabled=output_enabled)
+            output_result = await self.rails_manager.is_output_safe(
+                rail_messages, response_text, enabled=output_enabled
+            )
             records.extend(output_result.records)
             if not output_result.is_safe:
                 log.info("[%s] Output blocked: %s", req_id, display_reason(output_result))
@@ -1084,7 +1087,7 @@ class IORails(BaseGuardrails):
         *,
         input_enabled: Union[bool, list[str]] = True,
         records_out: Optional[list[RailCallRecord]] = None,
-    ) -> Optional[LLMResponse]:
+    ) -> Optional[tuple[LLMResponse, LLMMessages]]:
         """Sequential path: input rails block before LLM generation starts."""
         log.info("[%s] Running input rails", req_id)
         input_result = await self.rails_manager.is_input_safe(messages, enabled=input_enabled)
@@ -1103,7 +1106,7 @@ class IORails(BaseGuardrails):
             provider = self.engine_registry.provider_name("main")
             prompt = serialize_prompt(effective_messages)
             records_out.append(_make_generation_record(timed_llm_response, provider, prompt))
-        return timed_llm_response.response
+        return timed_llm_response.response, effective_messages
 
     async def _do_generate_speculative(
         self,
@@ -1114,7 +1117,7 @@ class IORails(BaseGuardrails):
         *,
         input_enabled: Union[bool, list[str]] = True,
         records_out: Optional[list[RailCallRecord]] = None,
-    ) -> Optional[LLMResponse]:
+    ) -> Optional[tuple[LLMResponse, LLMMessages]]:
         """Speculative path: input rails and LLM generation race concurrently."""
         log.info("[%s] Speculative generation: launching input rails + LLM concurrently", req_id)
 
@@ -1153,7 +1156,7 @@ class IORails(BaseGuardrails):
                     )
             raise
 
-        return response
+        return None if response is None else (response, messages)
 
     async def _parallel_input_rail_and_response_generation(
         self,
@@ -1436,6 +1439,7 @@ class IORails(BaseGuardrails):
         tool_output_enabled = options.rails.tool_output if options else True
 
         streaming_handler = StreamingHandler(include_metadata=include_metadata)
+        rail_messages = [dict(message) for message in messages]
         # Tool calls assembled by the stream: _generation_task rebinds this (via
         # nonlocal) to the engine's finalized list and _wrapped_iterator reads it
         # after the content stream drains. The engine emits the complete list once
@@ -1489,7 +1493,8 @@ class IORails(BaseGuardrails):
                     await streaming_handler.push_chunk(END_OF_STREAM)  # type: ignore[arg-type]
                     return
 
-                effective_messages = _apply_user_message_transforms(messages, input_result)
+                effective_messages = _apply_user_message_transforms(rail_messages, input_result)
+                rail_messages[:] = effective_messages
 
                 # Step 2: Stream main LLM content from structured response.
                 # delta_content is forwarded as text chunks; delta_tool_calls are
@@ -1615,7 +1620,7 @@ class IORails(BaseGuardrails):
                                     if self._has_streaming_output_rails:
                                         base_iterator = self._run_output_rails_in_streaming(
                                             streaming_handler=streaming_handler,
-                                            messages=messages,
+                                            messages=rail_messages,
                                             enabled=output_enabled,
                                             include_metadata=include_metadata,
                                         )
