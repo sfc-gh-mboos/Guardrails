@@ -402,10 +402,12 @@ class TestUnrunnableSurfaces:
 
         assert unsupported_surface_reason(surface) is None
 
-    def test_transform_surfaces_do_not_compile(self, deps):
-        """A surface that rewrites content is refused until IORails can apply the rewrite."""
-        with pytest.raises(RailCompilationError, match="transform"):
-            compile_rail("autoalign check input", RailDirection.INPUT, deps)
+    def test_transform_surfaces_compile(self, deps):
+        """A surface that rewrites content compiles once IORails can apply the rewrite."""
+        rail = compile_rail("autoalign check input", RailDirection.INPUT, deps)
+
+        assert rail.surface.transform_target is not None
+        assert unsupported_surface_reason(rail.surface) is None
 
     @pytest.mark.parametrize(
         "direction, flow",
@@ -428,22 +430,28 @@ class TestUnrunnableSurfaces:
 
         assert not missing, f"deny-list names surfaces the catalog does not have: {missing}"
 
-    def test_the_block_only_tier_splits_into_servable_and_retrieval_refused(self):
-        """Every block-only input/output surface is servable except the seven retrieval ones.
+    def test_the_io_tier_splits_into_servable_and_retrieval_refused(self):
+        """Every input/output surface is servable except the seven retrieval-dependent ones.
 
-        Measured: 42 servable, 7 refused. Pinning the split rather than a predicate means a
-        newly added manifest surface, or an action that grows a binding IORails cannot fill,
-        fails here rather than in a user's config.
+        Measured: 60 servable (42 block-only + 18 transform), 7 refused. Pinning the split
+        rather than a predicate means a newly added manifest surface, or an action that grows
+        a binding IORails cannot fill, fails here rather than in a user's config.
         """
         servable, refused = [], []
         for (direction, name), surface in default_rail_catalog().surfaces().items():
-            if direction is RailDirection.RETRIEVAL or surface.transform_target is not None:
+            if direction is RailDirection.RETRIEVAL:
                 continue
             bucket = refused if unsupported_surface_reason(surface) is not None else servable
             bucket.append((direction, name))
 
         assert sorted(refused) == sorted(RETRIEVAL_DEPENDENT_SURFACES)
-        assert len(servable) == 42
+        assert len(servable) == 60
+        transform_count = sum(
+            1
+            for direction, name in servable
+            if default_rail_catalog().surfaces()[(direction, name)].transform_target is not None
+        )
+        assert transform_count == 18
 
     def test_refusal_precedes_the_action_import(self, deps, monkeypatch):
         """An unrunnable surface is refused before its action module is imported."""

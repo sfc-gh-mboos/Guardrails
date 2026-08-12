@@ -21,12 +21,13 @@ from collections.abc import Coroutine, Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Optional, TypeVar, Union
 
-from nemoguardrails.actions.rail_outcome import RailOutcome
+from nemoguardrails.actions.rail_outcome import RailOutcome, TransformSpec, TransformTarget
 from nemoguardrails.guardrails.actions.tool_call_action import ToolCallRailAction
 from nemoguardrails.guardrails.actions.tool_result_action import ToolResultRailAction
 from nemoguardrails.guardrails.compiled_rail import CompiledRail, RailDependencies, compile_rail
 from nemoguardrails.guardrails.engine_registry import EngineRegistry
 from nemoguardrails.guardrails.guardrails_types import (
+    LLMMessages,
     RailCallRecord,
     RailDirection,
     RailResult,
@@ -148,12 +149,60 @@ _HTTP_CLIENT_SURFACE_NAMES: frozenset[str] = frozenset(
 def _rail_result(outcome: RailOutcome) -> RailResult:
     """Map an engine-neutral rail verdict onto IORails' rail result."""
     if outcome.is_transform:
-        # Unreachable: transform surfaces are refused at compile time until IORails can apply a
-        # rewrite. Raising keeps it that way, because the alternative -- reading TRANSFORM as
-        # "not blocked" -- allows the request and discards the rewrite with nothing to see.
-        raise NotImplementedError(f"rail returned {outcome.decision.value!r}, which IORails cannot apply")
+        return RailResult(
+            is_safe=True,
+            reason=outcome.reason,
+            transforms=outcome.transforms,
+            return_value={"allowed": True, "modified": True, **outcome.metadata},
+        )
     allowed = not outcome.is_blocked
     return RailResult(is_safe=allowed, reason=outcome.reason, return_value={"allowed": allowed, **outcome.metadata})
+
+
+_TRANSFORM_TARGET_ORDER = (
+    TransformTarget.USER_MESSAGE,
+    TransformTarget.BOT_MESSAGE,
+    TransformTarget.RELEVANT_CHUNKS,
+)
+
+
+def _merge_transforms(
+    existing: tuple[TransformSpec, ...], new: tuple[TransformSpec, ...]
+) -> tuple[TransformSpec, ...]:
+    """Combine rewrites with last-wins per target, in a stable target order."""
+    by_target = {spec.target: spec for spec in existing}
+    for spec in new:
+        by_target[spec.target] = spec
+    return tuple(by_target[target] for target in _TRANSFORM_TARGET_ORDER if target in by_target)
+
+
+def apply_transforms_to_messages(messages: LLMMessages, transforms: Sequence[TransformSpec]) -> LLMMessages:
+    """Return a copy of *messages* with the last user turn rewritten, if asked.
+
+    Only ``USER_MESSAGE`` specs are applied here. Retrieval rewrites are out of scope for
+    IORails; ``BOT_MESSAGE`` is applied to the response string, not the transcript.
+    """
+    rewritten: Optional[str] = None
+    for spec in transforms:
+        if spec.target is TransformTarget.USER_MESSAGE:
+            rewritten = spec.text
+    if rewritten is None:
+        return messages
+
+    updated: LLMMessages = [dict(message) for message in messages]
+    for index in range(len(updated) - 1, -1, -1):
+        if updated[index].get("role") == "user":
+            updated[index] = {**updated[index], "content": rewritten}
+            break
+    return updated
+
+
+def apply_transforms_to_bot_response(response: str, transforms: Sequence[TransformSpec]) -> str:
+    """Return the rewritten bot response when a ``BOT_MESSAGE`` transform is present."""
+    for spec in transforms:
+        if spec.target is TransformTarget.BOT_MESSAGE:
+            return spec.text
+    return response
 
 
 def _model_free_record(flow: str, rail_type: str, result: RailResult) -> RailCallRecord:
@@ -324,6 +373,16 @@ class RailsManager:
             actions[flow] = action
         return actions
 
+    def may_transform(self, direction: RailDirection, enabled: Union[bool, list[str]] = True) -> bool:
+        """Whether any enabled rail in *direction* declares a transform target."""
+        flows = self.input_flows if direction is RailDirection.INPUT else self.output_flows
+        active = self._enabled_flows(flows, enabled)
+        return self._flows_may_transform(direction, active)
+
+    def _flows_may_transform(self, direction: RailDirection, flows: Sequence[str]) -> bool:
+        """Whether any of *flows* declares a transform target."""
+        return any(self._rails[(direction, flow)].surface.transform_target is not None for flow in flows)
+
     async def is_input_safe(self, messages: list[dict], *, enabled: Union[bool, list[str]] = True) -> RailResult:
         """Run the enabled input rails, short-circuiting on the first failure.
 
@@ -331,15 +390,18 @@ class RailsManager:
         ``True`` (the default) runs all, ``False`` runs none, and a list runs only the
         named flows (matched on the normalized flow name). When parallel mode is enabled,
         all selected rails run concurrently and the first unsafe result cancels the rest.
+        Parallel mode is skipped when any selected rail may rewrite content: concurrent
+        rewrites cannot be merged safely, so those checks run sequentially and thread the
+        rewritten user message into later rails.
         """
         active = self._enabled_flows(self.input_flows, enabled)
         if not active:
             return RailResult(is_safe=True)
 
-        rails = {flow: self._run_rail(flow, RailDirection.INPUT, messages) for flow in active}
-        if self.input_parallel:
+        if self.input_parallel and not self._flows_may_transform(RailDirection.INPUT, active):
+            rails = {flow: self._run_rail(flow, RailDirection.INPUT, messages) for flow in active}
             return await self._run_rails_parallel(rails, RailDirection.INPUT)
-        return await self._run_rails_sequential(rails, RailDirection.INPUT)
+        return await self._run_content_rails_sequential(active, RailDirection.INPUT, messages)
 
     async def is_output_safe(
         self, messages: list[dict], response: str, *, enabled: Union[bool, list[str]] = True
@@ -350,15 +412,22 @@ class RailsManager:
         ``True`` (the default) runs all, ``False`` runs none, and a list runs only the
         named flows (matched on the normalized flow name). When parallel mode is enabled,
         all selected rails run concurrently and the first unsafe result cancels the rest.
+        Parallel mode is skipped when any selected rail may rewrite content: concurrent
+        rewrites cannot be merged safely, so those checks run sequentially and thread the
+        rewritten bot response into later rails.
         """
         active = self._enabled_flows(self.output_flows, enabled)
         if not active:
             return RailResult(is_safe=True)
 
-        rails = {flow: self._run_rail(flow, RailDirection.OUTPUT, messages, bot_response=response) for flow in active}
-        if self.output_parallel:
+        if self.output_parallel and not self._flows_may_transform(RailDirection.OUTPUT, active):
+            rails = {
+                flow: self._run_rail(flow, RailDirection.OUTPUT, messages, bot_response=response) for flow in active
+            }
             return await self._run_rails_parallel(rails, RailDirection.OUTPUT)
-        return await self._run_rails_sequential(rails, RailDirection.OUTPUT)
+        return await self._run_content_rails_sequential(
+            active, RailDirection.OUTPUT, messages, bot_response=response
+        )
 
     async def are_tool_calls_safe(
         self,
@@ -495,6 +564,41 @@ class RailsManager:
                     reason=display_reason(result) if not result.is_safe else None,
                 )
             return result
+
+    async def _run_content_rails_sequential(
+        self,
+        flows: Sequence[str],
+        direction: RailDirection,
+        messages: list[dict],
+        bot_response: Optional[str] = None,
+    ) -> RailResult:
+        """Run content rails one by one, threading rewrites into later rails.
+
+        Unlike the eager-coroutine sequential path used for tool rails, each rail is
+        started only after the previous one finishes, so a TRANSFORM can rewrite the
+        working user message or bot response before the next action sees it.
+        """
+        req_id = get_request_id()
+        working_messages = messages
+        working_response = bot_response
+        collected: list[RailCallRecord] = []
+        final_transforms: tuple[TransformSpec, ...] = ()
+
+        for flow in flows:
+            result = await self._run_rail(flow, direction, working_messages, bot_response=working_response)
+            collected.extend(result.records)
+            log.debug("[%s] %s flow %s result %s", req_id, direction.value, flow, result)
+            if not result.is_safe:
+                log.info("[%s] %s flow %s blocked", req_id, direction.value, flow)
+                return replace(result, records=tuple(collected))
+            if result.transforms:
+                working_messages = apply_transforms_to_messages(working_messages, result.transforms)
+                if direction is RailDirection.OUTPUT:
+                    working_response = apply_transforms_to_bot_response(working_response or "", result.transforms)
+                final_transforms = _merge_transforms(final_transforms, result.transforms)
+                log.info("[%s] %s flow %s transformed content", req_id, direction.value, flow)
+
+        return RailResult(is_safe=True, transforms=final_transforms, records=tuple(collected))
 
     async def _run_rails_sequential(
         self,

@@ -377,13 +377,6 @@ def _context_parameters(surface: RailSurface, flow: str) -> tuple[_ContextParame
     return tuple(bound)
 
 
-def _transform_target_reason(surface: RailSurface) -> Optional[str]:
-    """Report a surface that rewrites content, which IORails cannot apply yet."""
-    if surface.transform_target is None:
-        return None
-    return f"transforms {surface.transform_target.value!r}"
-
-
 # Surfaces whose actions read retrieval evidence out of the request context: ``relevant_chunks``,
 # ``relevant_chunks_sep``, or the Colang-internal ``_last_bot_prompt``. Keyed by direction as well
 # as name, because one rail can surface in both directions.
@@ -407,13 +400,10 @@ def _retrieval_context_reason(surface: RailSurface) -> Optional[str]:
     return "needs retrieval evidence, which manifest-driven execution does not supply yet"
 
 
-# Ordered so the cheapest, most structural check reports first. Each entry is removed by the
-# work that lifts its limitation: the context-binding refusal went when resolution was built,
-# and the transform refusal goes when IORails can apply a rewrite.
-_SURFACE_SUPPORT_CHECKS: tuple[Callable[[RailSurface], Optional[str]], ...] = (
-    _transform_target_reason,
-    _retrieval_context_reason,
-)
+# Ordered so the cheapest, most structural check reports first. Transform surfaces are
+# servable: RailsManager threads rewrites between rails and IORails applies them. Retrieval
+# evidence remains refused until IORails has a source for it.
+_SURFACE_SUPPORT_CHECKS: tuple[Callable[[RailSurface], Optional[str]], ...] = (_retrieval_context_reason,)
 
 
 def unsupported_surface_reason(surface: RailSurface) -> Optional[str]:

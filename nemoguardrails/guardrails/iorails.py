@@ -51,7 +51,11 @@ from nemoguardrails.guardrails.guardrails_types import (
     serialize_prompt,
     truncate,
 )
-from nemoguardrails.guardrails.rails_manager import RailsManager
+from nemoguardrails.guardrails.rails_manager import (
+    RailsManager,
+    apply_transforms_to_bot_response,
+    apply_transforms_to_messages,
+)
 from nemoguardrails.guardrails.telemetry import (
     are_metrics_enabled,
     get_tracer,
@@ -971,12 +975,17 @@ class IORails(BaseGuardrails):
                 record_request_blocked(RailDirection.INPUT)
             return _blocked_return()
 
-        if self._speculative_generation:
-            response = await self._do_generate_speculative(
+        # Speculative generation starts the main model on the original messages, so any
+        # input rail that may rewrite content forces the sequential path.
+        use_speculative = self._speculative_generation and not self.rails_manager.may_transform(
+            RailDirection.INPUT, input_enabled
+        )
+        if use_speculative:
+            response, messages = await self._do_generate_speculative(
                 messages, req_id, llm_kwargs, request_span, input_enabled=input_enabled, records_out=records
             )
         else:
-            response = await self._do_generate_sequential(
+            response, messages = await self._do_generate_sequential(
                 messages, req_id, llm_kwargs, input_enabled=input_enabled, records_out=records
             )
 
@@ -1020,6 +1029,9 @@ class IORails(BaseGuardrails):
                 if self._metrics_enabled:
                     record_request_blocked(RailDirection.OUTPUT)
                 return _blocked_return()
+            if output_result.transforms:
+                response_text = apply_transforms_to_bot_response(response_text, output_result.transforms)
+                log.info("[%s] Output transformed", req_id)
 
         if has_generation_options:
             log_obj = _build_generation_log(records, options, time.monotonic() - t_start)
@@ -1057,8 +1069,13 @@ class IORails(BaseGuardrails):
         *,
         input_enabled: Union[bool, list[str]] = True,
         records_out: Optional[list[RailCallRecord]] = None,
-    ) -> Optional[LLMResponse]:
-        """Sequential path: input rails block before LLM generation starts."""
+    ) -> tuple[Optional[LLMResponse], LLMMessages]:
+        """Sequential path: input rails block before LLM generation starts.
+
+        Returns ``(response, effective_messages)``. ``effective_messages`` carries any
+        input-rail rewrite of the user turn so later output rails see the same transcript
+        the main model was called with.
+        """
         log.info("[%s] Running input rails", req_id)
         input_result = await self.rails_manager.is_input_safe(messages, enabled=input_enabled)
         if records_out is not None:
@@ -1067,15 +1084,19 @@ class IORails(BaseGuardrails):
             log.info("[%s] Input blocked: %s", req_id, display_reason(input_result))
             if self._metrics_enabled:
                 record_request_blocked(RailDirection.INPUT)
-            return None
+            return None, messages
+
+        effective_messages = apply_transforms_to_messages(messages, input_result.transforms)
+        if input_result.transforms:
+            log.info("[%s] Input transformed", req_id)
 
         log.info("[%s] Calling main LLM", req_id)
-        timed_llm_response = await self._timed_main_call(messages, llm_kwargs)
+        timed_llm_response = await self._timed_main_call(effective_messages, llm_kwargs)
         if records_out is not None:
             provider = self.engine_registry.provider_name("main")
-            prompt = serialize_prompt(messages)
+            prompt = serialize_prompt(effective_messages)
             records_out.append(_make_generation_record(timed_llm_response, provider, prompt))
-        return timed_llm_response.response
+        return timed_llm_response.response, effective_messages
 
     async def _do_generate_speculative(
         self,
@@ -1086,8 +1107,13 @@ class IORails(BaseGuardrails):
         *,
         input_enabled: Union[bool, list[str]] = True,
         records_out: Optional[list[RailCallRecord]] = None,
-    ) -> Optional[LLMResponse]:
-        """Speculative path: input rails and LLM generation race concurrently."""
+    ) -> tuple[Optional[LLMResponse], LLMMessages]:
+        """Speculative path: input rails and LLM generation race concurrently.
+
+        Only used when no enabled input rail may transform: the main model is started on
+        the original messages, so a rewrite would be discarded. Returns the same
+        ``(response, messages)`` shape as the sequential path; ``messages`` is unchanged.
+        """
         log.info("[%s] Speculative generation: launching input rails + LLM concurrently", req_id)
 
         rails_task = asyncio.create_task(self.rails_manager.is_input_safe(messages, enabled=input_enabled))
@@ -1125,7 +1151,7 @@ class IORails(BaseGuardrails):
                     )
             raise
 
-        return response
+        return response, messages
 
     async def _parallel_input_rail_and_response_generation(
         self,
@@ -1296,6 +1322,8 @@ class IORails(BaseGuardrails):
         else:
             pass_content = _get_last_content_by_role(messages, "user")
 
+        content = pass_content
+
         if "input" in rails_to_run:
             user_content = _get_last_content_by_role(messages, "user")
             # Skip when there is no user content: the content-safety action requires
@@ -1310,6 +1338,10 @@ class IORails(BaseGuardrails):
                     return RailsResult(
                         status=RailStatus.BLOCKED, content=REFUSAL_MESSAGE, rail=input_result.triggered_rail
                     )
+                if input_result.transforms:
+                    messages = apply_transforms_to_messages(messages, input_result.transforms)
+                    if "output" not in rails_to_run:
+                        content = _get_last_content_by_role(messages, "user")
             else:
                 log.info("[%s] Input rails requested but no user content to check; skipping", req_id)
 
@@ -1327,10 +1359,14 @@ class IORails(BaseGuardrails):
                     return RailsResult(
                         status=RailStatus.BLOCKED, content=REFUSAL_MESSAGE, rail=output_result.triggered_rail
                     )
+                if output_result.transforms:
+                    content = apply_transforms_to_bot_response(bot_response, output_result.transforms)
             else:
                 log.info("[%s] Output rails requested but no assistant content to check; skipping", req_id)
 
-        return RailsResult(status=RailStatus.PASSED, content=pass_content)
+        if content != pass_content:
+            return RailsResult(status=RailStatus.MODIFIED, content=content)
+        return RailsResult(status=RailStatus.PASSED, content=content)
 
     def _validate_streaming_with_output_rails(self) -> None:
         """Raise if output rails exist but streaming is not enabled for them."""
@@ -1452,6 +1488,10 @@ class IORails(BaseGuardrails):
                     await streaming_handler.push_chunk(END_OF_STREAM)  # type: ignore[arg-type]
                     return
 
+                llm_messages = apply_transforms_to_messages(messages, input_result.transforms)
+                if input_result.transforms:
+                    log.info("[%s] Input transformed", req_id)
+
                 # Step 2: Stream main LLM content from structured response.
                 # delta_content is forwarded as text chunks; delta_tool_calls are
                 # accumulated and surfaced as a terminal JSON chunk after the text
@@ -1461,7 +1501,7 @@ class IORails(BaseGuardrails):
                 # Usage from the terminal usage-only chunk is folded into the END_OF_STREAM
                 # frame below (not its own frame), matching LLMRails' single terminal frame.
                 pending_usage_metadata: Optional[dict] = None
-                async for chunk in self.engine_registry.stream_model_call("main", messages, **llm_kwargs):
+                async for chunk in self.engine_registry.stream_model_call("main", llm_messages, **llm_kwargs):
                     chunk_metadata = _stream_chunk_metadata(chunk)
                     if chunk.delta_content:
                         content_parts.append(chunk.delta_content)
@@ -1716,6 +1756,17 @@ class IORails(BaseGuardrails):
                 yield _frame_for_stream(violation, include_metadata)
                 return
 
-            if not stream_first:
+            if stream_first:
+                # Tokens already reached the caller; applying a rewrite would disagree with
+                # what was streamed. Match RailOutcome's non-streaming transform contract.
+                if output_result.transforms:
+                    log.info("[%s] Output transform skipped after stream_first yield", req_id)
+                continue
+
+            if output_result.transforms:
+                rewritten = apply_transforms_to_bot_response(bot_response_chunk, output_result.transforms)
+                log.info("[%s] Output transformed", req_id)
+                yield _frame_for_stream(rewritten, include_metadata)
+            else:
                 for chunk in user_output_chunks:
                     yield chunk

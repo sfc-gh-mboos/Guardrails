@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional, TypeAlias
 
+from nemoguardrails.actions.rail_outcome import TransformSpec
 from nemoguardrails.types import LLMResponse, UsageInfo
 
 # LLMMessage can contain role/content, plus optional tool_calls / tool_call_id / name; content may be None
@@ -68,6 +69,11 @@ class RailCallRecord:
 class RailResult:
     """Result of a rail safety check.
 
+    ``transforms`` carries rewrites for ALLOW-equivalent TRANSFORM outcomes: the
+    conversation variables to replace and their new text. It is empty unless a rail
+    in this check rewrote content. ``is_safe`` is True for both ALLOW and TRANSFORM;
+    callers apply ``transforms`` themselves.
+
     ``records`` carries the per-rail execution records for every rail that ran in this
     check (not just the blocking one), so IORails can synthesize a ``GenerationLog``.
     It is empty unless log collection is active. ``return_value`` is the rail's
@@ -76,13 +82,14 @@ class RailResult:
 
     ``records`` and ``return_value`` are log-capture metadata, not part of the safety
     verdict, so they are excluded from equality and hashing (``compare=False``) — two
-    results with the same ``is_safe``/``reason``/``triggered_rail`` compare equal
-    regardless of captured log data.
+    results with the same ``is_safe``/``reason``/``triggered_rail``/``transforms``
+    compare equal regardless of captured log data.
     """
 
     is_safe: bool
     reason: str | None = None
     triggered_rail: str | None = None
+    transforms: tuple[TransformSpec, ...] = ()
     records: tuple[RailCallRecord, ...] = field(default=(), compare=False)
     return_value: Any = field(default=None, compare=False)
 

@@ -33,8 +33,11 @@ from nemoguardrails.guardrails.model_engine import ModelEngine
 from nemoguardrails.guardrails.rails_manager import (
     _HTTP_CLIENT_SURFACE_NAMES,
     RailsManager,
+    _merge_transforms,
     _rail_call_record,
     _rail_result,
+    apply_transforms_to_bot_response,
+    apply_transforms_to_messages,
 )
 from nemoguardrails.http.retry import RetryingHTTPClient
 from nemoguardrails.llm.taskmanager import LLMTaskManager
@@ -1172,14 +1175,49 @@ class TestOutcomeToResult:
         assert result.is_safe is is_safe
         assert result.return_value == {"allowed": is_safe}
 
-    def test_a_transform_raises_rather_than_reading_as_allowed(self):
-        """A rewrite IORails cannot apply fails loudly instead of allowing and discarding it."""
-        # Transform surfaces are refused at compile time, so this is a tripwire for the PR
-        # that implements them rather than a path a config can reach.
+    def test_a_transform_maps_to_an_allowed_result_with_rewrites(self):
+        """A rewrite is an allow-equivalent verdict that carries the transform specs."""
         outcome = RailOutcome.transform([(TransformTarget.USER_MESSAGE, "masked")])
 
-        with pytest.raises(NotImplementedError, match="transform"):
-            _rail_result(outcome)
+        result = _rail_result(outcome)
+
+        assert result.is_safe is True
+        assert result.transforms == outcome.transforms
+        assert result.return_value == {"allowed": True, "modified": True}
+
+
+class TestTransformHelpers:
+    """Rewrite helpers keep message/response threading consistent across rails."""
+
+    def test_apply_transforms_rewrites_the_last_user_message(self):
+        messages = [
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "hi"},
+            {"role": "user", "content": "second"},
+        ]
+        transforms = RailOutcome.transform([(TransformTarget.USER_MESSAGE, "masked")]).transforms
+
+        updated = apply_transforms_to_messages(messages, transforms)
+
+        assert updated[-1]["content"] == "masked"
+        assert messages[-1]["content"] == "second"
+
+    def test_apply_transforms_rewrites_bot_response(self):
+        transforms = RailOutcome.transform([(TransformTarget.BOT_MESSAGE, "masked bot")]).transforms
+
+        assert apply_transforms_to_bot_response("original", transforms) == "masked bot"
+
+    def test_merge_transforms_is_last_wins_per_target(self):
+        first = RailOutcome.transform([(TransformTarget.USER_MESSAGE, "one")]).transforms
+        second = RailOutcome.transform(
+            [(TransformTarget.USER_MESSAGE, "two"), (TransformTarget.BOT_MESSAGE, "bot")]
+        ).transforms
+
+        merged = _merge_transforms(first, second)
+
+        assert merged == RailOutcome.transform(
+            [(TransformTarget.USER_MESSAGE, "two"), (TransformTarget.BOT_MESSAGE, "bot")]
+        ).transforms
 
 
 class TestRailCallRecordNaming:
