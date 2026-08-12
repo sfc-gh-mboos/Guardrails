@@ -24,6 +24,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestServer
 
 from nemoguardrails import Guardrails
+from nemoguardrails.actions.rail_outcome import RailOutcome, TransformTarget
 from nemoguardrails.guardrails.guardrails_types import RailDirection, RailResult
 from nemoguardrails.guardrails.iorails import REFUSAL_MESSAGE, IORails
 from nemoguardrails.guardrails.model_engine import ModelEngine
@@ -31,6 +32,28 @@ from nemoguardrails.rails.llm.config import RailsConfig
 from nemoguardrails.rails.llm.options import GenerationOptions, GenerationResponse
 from nemoguardrails.types import LLMResponse, LLMResponseChunk, ToolCall, ToolCallFunction
 from tests.guardrails.test_data import CONTENT_SAFETY_CONFIG, NEMOGUARDS_CONFIG
+
+
+def _sensitive_data_mask_config(*, speculative_generation: bool = False) -> RailsConfig:
+    """Build a real config whose input and output masks run through IORails."""
+    return RailsConfig.from_content(
+        config={
+            "models": [{"type": "main", "engine": "nim", "model": "test-model"}],
+            "rails": {
+                "config": {
+                    "sensitive_data_detection": {
+                        "input": {"entities": ["EMAIL_ADDRESS"]},
+                        "output": {"entities": ["PHONE_NUMBER"]},
+                    }
+                },
+                "input": {
+                    "flows": ["mask sensitive data on input"],
+                    "speculative_generation": speculative_generation,
+                },
+                "output": {"flows": ["mask sensitive data on output"]},
+            },
+        }
+    )
 
 
 @pytest.fixture
@@ -337,6 +360,52 @@ class TestGenerateAsync:
 
         with pytest.raises(RuntimeError, match="LLM internal error"):
             await iorails.generate_async(messages=[{"role": "user", "content": "hi"}])
+
+    @pytest.mark.asyncio
+    @patch.dict("os.environ", {"NVIDIA_API_KEY": "test-key"})
+    async def test_sensitive_data_masks_rewrite_input_and_output_end_to_end(self, monkeypatch):
+        """Catalog mask outcomes rewrite the main-model prompt and returned assistant text."""
+
+        async def mask_sensitive_data(source, text, config):
+            replacement = "email <EMAIL_ADDRESS>" if source == "input" else "phone <PHONE_NUMBER>"
+            target = TransformTarget.USER_MESSAGE if source == "input" else TransformTarget.BOT_MESSAGE
+            return RailOutcome.transform([(target, replacement)])
+
+        monkeypatch.setattr(
+            "nemoguardrails.library.sensitive_data_detection.actions.mask_sensitive_data",
+            mask_sensitive_data,
+        )
+        engine = IORails(_sensitive_data_mask_config())
+        engine.engine_registry.model_call = AsyncMock(return_value=LLMResponse(content="phone 555-0100"))
+        messages = [{"role": "user", "content": "email person@example.com"}]
+
+        try:
+            result = await engine.generate_async(messages=messages)
+        finally:
+            await engine.stop()
+
+        assert result == {"role": "assistant", "content": "phone <PHONE_NUMBER>"}
+        engine.engine_registry.model_call.assert_awaited_once_with(
+            "main", [{"role": "user", "content": "email <EMAIL_ADDRESS>"}]
+        )
+        assert messages == [{"role": "user", "content": "email person@example.com"}]
+
+    @patch.dict("os.environ", {"NVIDIA_API_KEY": "test-key"})
+    def test_input_masks_disable_speculative_generation(self, monkeypatch):
+        """A main-model call cannot race ahead of an input rewrite."""
+
+        async def mask_sensitive_data(source, text, config):
+            return RailOutcome.allow()
+
+        monkeypatch.setattr(
+            "nemoguardrails.library.sensitive_data_detection.actions.mask_sensitive_data",
+            mask_sensitive_data,
+        )
+
+        with pytest.warns(UserWarning, match="input transform rails"):
+            engine = IORails(_sensitive_data_mask_config(speculative_generation=True))
+
+        assert engine._speculative_generation is False
 
 
 class TestToolCalling:

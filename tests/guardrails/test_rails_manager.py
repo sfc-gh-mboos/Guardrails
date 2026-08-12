@@ -1138,14 +1138,15 @@ class TestOutcomeToResult:
         assert result.is_safe is is_safe
         assert result.return_value == {"allowed": is_safe}
 
-    def test_a_transform_raises_rather_than_reading_as_allowed(self):
-        """A rewrite IORails cannot apply fails loudly instead of allowing and discarding it."""
-        # Transform surfaces are refused at compile time, so this is a tripwire for the PR
-        # that implements them rather than a path a config can reach.
+    def test_a_transform_becomes_a_safe_verdict_with_rewrite_payload(self):
+        """A rewrite remains attached to the safe verdict for IORails to apply."""
         outcome = RailOutcome.transform([(TransformTarget.USER_MESSAGE, "masked")])
 
-        with pytest.raises(NotImplementedError, match="transform"):
-            _rail_result(outcome)
+        result = _rail_result(outcome)
+
+        assert result.is_safe is True
+        assert result.transforms == outcome.transforms
+        assert result.return_value == {"allowed": True}
 
 
 class TestRailCallRecordNaming:

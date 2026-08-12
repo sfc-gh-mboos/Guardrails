@@ -392,6 +392,23 @@ class TestIORailsUnsupportedReason:
         assert reason is not None
         assert "transform" in reason
 
+    def test_sensitive_data_mask_flows_are_iorails_compatible(self):
+        """The transform tier includes the catalog's input and output sensitive-data masks."""
+        config = _make_iorails_config(
+            rails={
+                "config": {
+                    "sensitive_data_detection": {
+                        "input": {"entities": ["EMAIL_ADDRESS"]},
+                        "output": {"entities": ["PHONE_NUMBER"]},
+                    }
+                },
+                "input": {"flows": ["mask sensitive data on input"]},
+                "output": {"flows": ["mask sensitive data on output"]},
+            }
+        )
+
+        assert IORails.unsupported_reason(config, llm=None) is None
+
     def test_unsupported_output_flow_reports_offender(self):
         """An output flow outside the IORails-supported set is named in the reason."""
         config = _make_iorails_config(
