@@ -426,15 +426,14 @@ class TestIORailsUnsupportedReason:
         [
             (
                 "activefence moderation on input detailed",
-                "'activefence moderation on input detailed' declares context binding(s) for 'text', "
-                "which manifest-driven execution does not fill yet",
+                "config has unsupported input flows: ['activefence moderation on input detailed']",
             ),
             (
                 "gcpnlp moderation detailed",
                 "config has unsupported input flows: ['gcpnlp moderation detailed']",
             ),
         ],
-        ids=["unservable", "out-of-scope"],
+        ids=["context-bindable-but-out-of-scope", "out-of-scope"],
     )
     def test_detailed_flow_without_iorails_adapter_reports_offender(self, flow, expected):
         """Detailed flows fall back to LLMRails, named either as unservable or as out of scope."""

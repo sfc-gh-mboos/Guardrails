@@ -215,11 +215,7 @@ class CompiledRail:
     def _call_kwargs(self, messages: LLMMessages, bot_response: Optional[str]) -> dict[str, Any]:
         """Assemble the action's arguments from its declared parameters and the manifest."""
         dependencies = self._request_dependencies(messages, bot_response)
-        kwargs = {
-            name: value
-            for name, value in dependencies.items()
-            if name in self._accepted
-        }
+        kwargs = {name: value for name, value in dependencies.items() if name in self._accepted}
         for bound in self._bound:
             kwargs[bound.action_param] = (
                 dependencies["context"][bound.context_key] if bound.context_key is not None else bound.value

@@ -575,9 +575,7 @@ class RailsManager:
                         await asyncio.wait(pending_tasks)
                     return replace(first_unsafe, records=tuple(collected))
             transforms = tuple(
-                transform
-                for index in sorted(transforms_by_order)
-                for transform in transforms_by_order[index]
+                transform for index in sorted(transforms_by_order) for transform in transforms_by_order[index]
             )
             return RailResult(is_safe=True, records=tuple(collected), transforms=transforms)
         except BaseException:
