@@ -93,7 +93,44 @@ def vcr_cassette_dir(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture
-def rail_ran_cleanly(caplog: pytest.LogCaptureFixture):
+def caplog_guardrails(caplog: pytest.LogCaptureFixture):
+    """Capture records from ``nemoguardrails.guardrails`` despite ``propagate=False``.
+
+    ``Guardrails`` calls ``configure_logging``, which attaches a stream handler to the
+    package logger and disables propagation. Caplog's root-attached handler then never
+    sees ``rail_guard`` (or other package) ERROR records, so a fixture that only watches
+    the root would miss the fail-closed envelope's own log line.
+    """
+    package_logger = logging.getLogger("nemoguardrails.guardrails")
+    original_propagate = package_logger.propagate
+    package_logger.addHandler(caplog.handler)
+    package_logger.propagate = False
+    try:
+        with caplog.at_level(logging.ERROR, logger="nemoguardrails.guardrails"):
+            yield caplog
+    finally:
+        package_logger.removeHandler(caplog.handler)
+        package_logger.propagate = original_propagate
+
+
+def _rail_error_messages(caplog_fixture: pytest.LogCaptureFixture) -> list[str]:
+    """ERROR messages from the fail-closed envelope, ignoring unrelated noise.
+
+    ``rail_guard`` logs ``"<rail> failed: ..."`` (or the HTTP variant). Caplog can also
+    see aiohttp's ``Unclosed client session`` when a test leaves a client open; that is a
+    lifecycle leak, not a cassette miss, so it is filtered here.
+    """
+    return [
+        record.getMessage()
+        for record in caplog_fixture.get_records("call")
+        if record.levelno >= logging.ERROR
+        and record.name.startswith("nemoguardrails.guardrails")
+        and " failed" in record.getMessage()
+    ]
+
+
+@pytest.fixture
+def rail_ran_cleanly(caplog_guardrails: pytest.LogCaptureFixture):
     """Fail the test if any rail errored, which is what an unreplayed cassette looks like.
 
     Without this a blocked-case assertion is vacuous: a cassette that fails to replay raises
@@ -101,19 +138,18 @@ def rail_ran_cleanly(caplog: pytest.LogCaptureFixture):
     with the same refusal text, and status, rail and content all still match. The rail logs at
     ERROR when it fails and does not when it reaches a verdict, so that is the difference.
     """
-    with caplog.at_level(logging.ERROR):
-        yield
-        # get_records("call") rather than .records: during teardown the latter reports the
-        # teardown phase, which is empty, and the check would pass no matter what the rail did.
-        errors = [record.getMessage() for record in caplog.get_records("call") if record.levelno >= logging.ERROR]
-        assert not errors, f"a rail errored, so the cassette did not replay: {errors}"
+    yield
+    # get_records("call") rather than .records: during teardown the latter reports the
+    # teardown phase, which is empty, and the check would pass no matter what the rail did.
+    errors = _rail_error_messages(caplog_guardrails)
+    assert not errors, f"a rail errored, so the cassette did not replay: {errors}"
 
 
 async def check_iorails(config, messages: list[dict], rail_types: tuple[RailType, ...]):
     """Run rails through Guardrails, asserting IORails is the engine that served them."""
-    guardrails = Guardrails(load_config(config))
-    assert guardrails.use_iorails_engine, f"{config.name!r} routed to LLMRails, so this test proves nothing"
-    return await guardrails.check_async(messages, rail_types=list(rail_types))
+    async with Guardrails(load_config(config)) as guardrails:
+        assert guardrails.use_iorails_engine, f"{config.name!r} routed to LLMRails, so this test proves nothing"
+        return await guardrails.check_async(messages, rail_types=list(rail_types))
 
 
 async def test_content_safety_input_allows_safe_user_message(nvidia_api_key, rail_ran_cleanly):
@@ -239,7 +275,7 @@ async def test_f5_guardrails_output_blocks_violating_assistant_message(f5_api_ke
     assert result.content == REFUSAL
 
 
-async def test_f5_guardrails_input_fails_closed_on_401(f5_api_key, monkeypatch, caplog):
+async def test_f5_guardrails_input_fails_closed_on_401(f5_api_key, monkeypatch, caplog_guardrails):
     """A recorded 401 blocks on both engines, but IORails renders the plain refusal."""
     # LLMRails renders "I'm sorry, an internal error has occurred." here, distinguishing a rail
     # that failed from a rail that fired. IORails renders one refusal for both, so a caller
@@ -248,13 +284,12 @@ async def test_f5_guardrails_input_fails_closed_on_401(f5_api_key, monkeypatch, 
 
     # Cleared first: records leak between tests in a module, and a stale error from an earlier
     # F5 case would satisfy the 401 check below without this rail ever reaching the provider.
-    caplog.clear()
-    with caplog.at_level(logging.ERROR):
-        result = await check_iorails(
-            F5_GUARDRAILS_INVALID_KEY_CONFIG,
-            [{"role": "user", "content": "Can you explain your return policy?"}],
-            (RailType.INPUT,),
-        )
+    caplog_guardrails.clear()
+    result = await check_iorails(
+        F5_GUARDRAILS_INVALID_KEY_CONFIG,
+        [{"role": "user", "content": "Can you explain your return policy?"}],
+        (RailType.INPUT,),
+    )
 
     assert result.status is RailStatus.BLOCKED
     assert result.rail == "f5 guardrails scan input"
@@ -265,8 +300,9 @@ async def test_f5_guardrails_input_fails_closed_on_401(f5_api_key, monkeypatch, 
     # would fail the rail for a different reason and satisfy every assertion above. Matched on
     # the provider's own phrasing rather than "401", which also appears in this test's cassette
     # filename and so shows up in the message VCR raises when the cassette is absent.
-    assert any("F5 Guardrails API error: 401" in record.getMessage() for record in caplog.records), (
-        f"expected the recorded 401 to fail the rail, got: {[r.getMessage() for r in caplog.records]}"
+    messages = _rail_error_messages(caplog_guardrails)
+    assert any("F5 Guardrails API error: 401" in message for message in messages), (
+        f"expected the recorded 401 to fail the rail, got: {messages}"
     )
 
 
