@@ -39,9 +39,9 @@ import pytest
 from nemoguardrails.actions.rail_outcome import RailOutcome, TransformTarget
 from nemoguardrails.guardrails.guardrails_types import RailDirection
 from nemoguardrails.guardrails.iorails import REFUSAL_MESSAGE, IORails
-from nemoguardrails.rails.llm.options import RailStatus
 from nemoguardrails.guardrails.model_engine import ModelEngine
 from nemoguardrails.rails.llm.config import RailsConfig
+from nemoguardrails.rails.llm.options import RailStatus
 from nemoguardrails.types import LLMResponse
 from tests.guardrails.test_data import (
     CONTENT_SAFETY_INPUT_PROMPT,
@@ -457,9 +457,7 @@ class TestTransformsAgreeAcrossEngines:
         llm_config = RailsConfig.from_content(config=config_dict)
         chat = TestChat(llm_config, llm_completions=[SECRET_OUTPUT])
         chat.app.register_action(_redact_bot, "mask_sensitive_data")
-        llmrails_content = _assistant_content(
-            await chat.app.generate_async(messages=messages)
-        )
+        llmrails_content = _assistant_content(await chat.app.generate_async(messages=messages))
 
         with patch.dict("os.environ", {"NVIDIA_API_KEY": "test-key"}):
             iorails = IORails(RailsConfig.from_content(config=config_dict))

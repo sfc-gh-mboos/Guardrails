@@ -153,9 +153,7 @@ _HTTP_CLIENT_SURFACE_NAMES: frozenset[str] = frozenset(
 def _rail_result(outcome: RailOutcome) -> RailResult:
     """Map an engine-neutral rail verdict onto IORails' rail result."""
     if outcome.is_blocked:
-        return RailResult(
-            is_safe=False, reason=outcome.reason, return_value={"allowed": False, **outcome.metadata}
-        )
+        return RailResult(is_safe=False, reason=outcome.reason, return_value={"allowed": False, **outcome.metadata})
     if outcome.is_transform:
         unknown = [spec.target.value for spec in outcome.transforms if spec.target not in _APPLYABLE_TRANSFORM_TARGETS]
         if unknown:
@@ -378,7 +376,9 @@ class RailsManager:
             return RailResult(is_safe=True)
 
         if self.output_parallel:
-            rails = {flow: self._run_rail(flow, RailDirection.OUTPUT, messages, bot_response=response) for flow in active}
+            rails = {
+                flow: self._run_rail(flow, RailDirection.OUTPUT, messages, bot_response=response) for flow in active
+            }
             return await self._run_rails_parallel(rails, RailDirection.OUTPUT)
         return await self._run_rails_sequential_rewriting(active, RailDirection.OUTPUT, messages, response)
 
