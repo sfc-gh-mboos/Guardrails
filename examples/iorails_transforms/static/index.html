@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>IORails transform playground</title>
+    <style>
+      :root {
+        --bg: #14120b;
+        --fg: #edecec;
+        --muted: rgba(237, 236, 236, 0.6);
+        --accent: #f54e00;
+        --card: #1b1913;
+        --card-02: #201e18;
+        --ok: #7dce82;
+        --warn: #f0c14b;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+        line-height: 1.45;
+      }
+      main {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 32px 20px 64px;
+      }
+      h1 { font-size: 1.6rem; margin: 0 0 8px; }
+      p.lead { color: var(--muted); margin: 0 0 24px; }
+      form {
+        background: var(--card);
+        border-radius: 12px;
+        padding: 20px;
+        display: grid;
+        gap: 16px;
+      }
+      label { display: grid; gap: 6px; font-size: 0.9rem; color: var(--muted); }
+      textarea, select, input {
+        background: var(--card-02);
+        color: var(--fg);
+        border: 1px solid #2b2923;
+        border-radius: 8px;
+        padding: 10px 12px;
+        font: inherit;
+      }
+      textarea { min-height: 90px; resize: vertical; }
+      .row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+      button {
+        background: var(--accent);
+        color: #fff;
+        border: 0;
+        border-radius: 8px;
+        padding: 10px 16px;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+        justify-self: start;
+      }
+      button:disabled { opacity: 0.5; cursor: wait; }
+      .hint { font-size: 0.85rem; color: var(--muted); margin: 0; }
+      .results { margin-top: 24px; display: grid; gap: 16px; }
+      .card {
+        background: var(--card);
+        border-radius: 12px;
+        padding: 16px 18px;
+      }
+      .card h2 { margin: 0 0 10px; font-size: 1rem; }
+      .badge {
+        display: inline-block;
+        font-size: 0.75rem;
+        padding: 2px 8px;
+        border-radius: 999px;
+        margin-left: 8px;
+        background: #26241e;
+      }
+      .badge.ok { color: var(--ok); }
+      .badge.warn { color: var(--warn); }
+      pre {
+        margin: 8px 0 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: var(--card-02);
+        padding: 12px;
+        border-radius: 8px;
+        font-size: 0.85rem;
+      }
+      .error { color: #ff8a80; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>IORails transform playground</h1>
+      <p class="lead">
+        Same catalog rails and <code>SECRET</code> → <code>[REDACTED]</code> stub
+        as the cross-engine tests. Compare LLMRails and IORails on
+        <code>check()</code> or <code>generate()</code>.
+      </p>
+      <form id="form">
+        <label>
+          Text
+          <textarea name="text">my token is SECRET</textarea>
+        </label>
+        <div class="row">
+          <label>
+            Surface
+            <select name="mode">
+              <option value="input">Input rewrite</option>
+              <option value="output">Output rewrite</option>
+              <option value="both">Input + output (generate only)</option>
+            </select>
+          </label>
+          <label>
+            API
+            <select name="api">
+              <option value="check">check()</option>
+              <option value="generate">generate()</option>
+            </select>
+          </label>
+          <label>
+            Engine
+            <select name="engine">
+              <option value="both">Both engines</option>
+              <option value="iorails">IORails only</option>
+              <option value="llmrails">LLMRails only</option>
+            </select>
+          </label>
+        </div>
+        <label>
+          Fake main-model reply (generate / output)
+          <input name="bot_stub" value="here is SECRET" />
+        </label>
+        <p class="hint">
+          Input <code>check()</code> rewrites the user text.
+          Output <code>check()</code> treats the text as the assistant turn.
+          <code>generate()</code> calls a stub main model, then applies output
+          rails to that reply.
+        </p>
+        <button type="submit">Run</button>
+      </form>
+      <div class="results" id="results"></div>
+    </main>
+    <script>
+      const form = document.getElementById("form");
+      const results = document.getElementById("results");
+
+      function card(title, badge, body) {
+        return `<article class="card"><h2>${title}${badge}</h2><pre>${body}</pre></article>`;
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const data = Object.fromEntries(new FormData(form));
+        const button = form.querySelector("button");
+        button.disabled = true;
+        results.innerHTML = '<p class="hint">Running…</p>';
+        try {
+          const res = await fetch("/api/compare", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          });
+          const json = await res.json();
+          if (!res.ok) {
+            results.innerHTML = `<p class="error">${json.detail || JSON.stringify(json)}</p>`;
+            return;
+          }
+          const agree =
+            json.results.length === 2 &&
+            JSON.stringify(json.results[0].status || json.results[0].response) ===
+              JSON.stringify(json.results[1].status || json.results[1].response);
+          const meta = card(
+            "Request",
+            json.can_handle
+              ? '<span class="badge ok">IORails can_handle</span>'
+              : '<span class="badge warn">fallback</span>',
+            JSON.stringify(
+              {
+                api: json.api,
+                mode: json.mode,
+                messages: json.messages,
+                bot_stub: json.bot_stub,
+                engines_agree: json.results.length === 2 ? agree : null,
+              },
+              null,
+              2
+            )
+          );
+          const engineCards = json.results
+            .map((item) => {
+              const ok = item.status ? item.status !== "blocked" : true;
+              const badge = `<span class="badge ${ok ? "ok" : "warn"}">${item.status || item.api}</span>`;
+              return card(item.engine, badge, JSON.stringify(item, null, 2));
+            })
+            .join("");
+          results.innerHTML = meta + engineCards;
+        } catch (err) {
+          results.innerHTML = `<p class="error">${err}</p>`;
+        } finally {
+          button.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Cross-engine decision baseline for the four rails IORails ships today.
+"""Cross-engine decision baseline for the rails IORails ships.
 
 Every case runs one config and one model payload through **both** engines and asserts they
 produce the same response, content for content. Same input, same verdict, two entirely
@@ -36,7 +36,10 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
+from nemoguardrails.actions.rail_outcome import RailOutcome, TransformTarget
+from nemoguardrails.guardrails.guardrails_types import RailDirection
 from nemoguardrails.guardrails.iorails import REFUSAL_MESSAGE, IORails
+from nemoguardrails.rails.llm.options import RailStatus
 from nemoguardrails.guardrails.model_engine import ModelEngine
 from nemoguardrails.rails.llm.config import RailsConfig
 from nemoguardrails.types import LLMResponse
@@ -347,3 +350,165 @@ class TestJailbreakAgreesAcrossEngines:
 
         assert llmrails_content == MAIN_OUTPUT
         assert iorails_content == MAIN_OUTPUT
+
+
+SECRET_INPUT = "my token is SECRET"
+REDACTED_INPUT = "my token is [REDACTED]"
+SECRET_OUTPUT = "here is SECRET"
+REDACTED_OUTPUT = "here is [REDACTED]"
+
+
+def _mask_input_config() -> dict:
+    """Single input-masking rail both engines load from the catalog."""
+    return {
+        "models": [copy.deepcopy(NEMOGUARDS_CONFIG["models"][0])],
+        "rails": {
+            "input": {"flows": ["mask sensitive data on input"]},
+            "config": {"sensitive_data_detection": {"input": {"entities": ["PERSON"]}}},
+        },
+    }
+
+
+def _mask_output_config() -> dict:
+    """Single output-masking rail both engines load from the catalog."""
+    return {
+        "models": [copy.deepcopy(NEMOGUARDS_CONFIG["models"][0])],
+        "rails": {
+            "output": {"flows": ["mask sensitive data on output"]},
+            "config": {"sensitive_data_detection": {"output": {"entities": ["PERSON"]}}},
+        },
+    }
+
+
+async def _redact_user(source, text, config, **kwargs):
+    """Catalog-shaped mask action: rewrite SECRET in the user turn."""
+    if "SECRET" in text:
+        return RailOutcome.transform([(TransformTarget.USER_MESSAGE, text.replace("SECRET", "[REDACTED]"))])
+    return RailOutcome.allow()
+
+
+async def _redact_bot(source, text, config, **kwargs):
+    """Catalog-shaped mask action: rewrite SECRET in the bot turn."""
+    if "SECRET" in text:
+        return RailOutcome.transform([(TransformTarget.BOT_MESSAGE, text.replace("SECRET", "[REDACTED]"))])
+    return RailOutcome.allow()
+
+
+def _install_iorails_action(iorails: IORails, flow: str, direction: RailDirection, action) -> None:
+    """Replace the compiled catalog action so the test does not call Presidio."""
+    iorails.rails_manager._rails[(direction, flow)]._action = action
+
+
+class TestTransformsAgreeAcrossEngines:
+    """Catalog rewrite rails produce the same check and generate results on both engines."""
+
+    @pytest.mark.asyncio
+    async def test_input_check_returns_the_same_modified_content(self):
+        """check() on a user-turn rewrite is MODIFIED with the redacted text on both engines."""
+        config_dict = _mask_input_config()
+        messages = [{"role": "user", "content": SECRET_INPUT}]
+        assert IORails.can_handle(RailsConfig.from_content(config=config_dict))
+
+        llm_config = RailsConfig.from_content(config=config_dict)
+        chat = TestChat(llm_config, llm_completions=[MAIN_OUTPUT])
+        chat.app.register_action(_redact_user, "mask_sensitive_data")
+        llmrails_result = await chat.app.check_async(messages)
+
+        with patch.dict("os.environ", {"NVIDIA_API_KEY": "test-key"}):
+            iorails = IORails(RailsConfig.from_content(config=config_dict))
+        async with iorails:
+            _install_iorails_action(iorails, "mask sensitive data on input", RailDirection.INPUT, _redact_user)
+            iorails_result = await iorails.check_async(messages)
+
+        assert llmrails_result.status == RailStatus.MODIFIED
+        assert iorails_result.status == RailStatus.MODIFIED
+        assert llmrails_result.content == REDACTED_INPUT
+        assert iorails_result.content == REDACTED_INPUT
+
+    @pytest.mark.asyncio
+    async def test_output_check_returns_the_same_modified_content(self):
+        """check() on an assistant-turn rewrite is MODIFIED with the redacted text on both engines."""
+        config_dict = _mask_output_config()
+        messages = [{"role": "assistant", "content": SECRET_OUTPUT}]
+        assert IORails.can_handle(RailsConfig.from_content(config=config_dict))
+
+        llm_config = RailsConfig.from_content(config=config_dict)
+        chat = TestChat(llm_config, llm_completions=[MAIN_OUTPUT])
+        chat.app.register_action(_redact_bot, "mask_sensitive_data")
+        llmrails_result = await chat.app.check_async(messages)
+
+        with patch.dict("os.environ", {"NVIDIA_API_KEY": "test-key"}):
+            iorails = IORails(RailsConfig.from_content(config=config_dict))
+        async with iorails:
+            _install_iorails_action(iorails, "mask sensitive data on output", RailDirection.OUTPUT, _redact_bot)
+            iorails_result = await iorails.check_async(messages)
+
+        assert llmrails_result.status == RailStatus.MODIFIED
+        assert iorails_result.status == RailStatus.MODIFIED
+        assert llmrails_result.content == REDACTED_OUTPUT
+        assert iorails_result.content == REDACTED_OUTPUT
+
+    @pytest.mark.asyncio
+    async def test_output_generate_returns_the_same_rewritten_assistant_text(self):
+        """generate() after an output rewrite returns the redacted assistant text on both engines."""
+        config_dict = _mask_output_config()
+        messages = [{"role": "user", "content": USER_INPUT}]
+
+        llm_config = RailsConfig.from_content(config=config_dict)
+        chat = TestChat(llm_config, llm_completions=[SECRET_OUTPUT])
+        chat.app.register_action(_redact_bot, "mask_sensitive_data")
+        llmrails_content = _assistant_content(
+            await chat.app.generate_async(messages=messages)
+        )
+
+        with patch.dict("os.environ", {"NVIDIA_API_KEY": "test-key"}):
+            iorails = IORails(RailsConfig.from_content(config=config_dict))
+        async with iorails:
+            for name, engine in iorails.engine_registry._engines.items():
+                if isinstance(engine, ModelEngine) and name == "main":
+                    engine.chat_completion = AsyncMock(return_value=LLMResponse(content=SECRET_OUTPUT))
+            _install_iorails_action(iorails, "mask sensitive data on output", RailDirection.OUTPUT, _redact_bot)
+            iorails_content = _assistant_content(await iorails.generate_async(messages=messages))
+
+        assert llmrails_content == REDACTED_OUTPUT
+        assert iorails_content == REDACTED_OUTPUT
+
+    @pytest.mark.asyncio
+    async def test_input_generate_hides_the_secret_from_both_main_models(self):
+        """generate() rewrites the user turn before either engine's main model call."""
+        config_dict = _mask_input_config()
+        messages = [{"role": "user", "content": SECRET_INPUT}]
+
+        llm_config = RailsConfig.from_content(config=config_dict)
+        chat = TestChat(llm_config, llm_completions=[MAIN_OUTPUT])
+        chat.app.register_action(_redact_user, "mask_sensitive_data")
+        llm_prompts: list[str] = []
+        original = chat.llm.generate_async
+
+        async def _capture_llmrails_prompt(prompt, **kwargs):
+            llm_prompts.append(prompt if isinstance(prompt, str) else str(prompt))
+            return await original(prompt, **kwargs)
+
+        chat.llm.generate_async = _capture_llmrails_prompt
+        llmrails_content = _assistant_content(await chat.app.generate_async(messages=messages))
+
+        iorails_messages: list[list[dict]] = []
+
+        async def _capture_iorails_messages(_model_type, sent, **_kwargs):
+            iorails_messages.append(sent)
+            return LLMResponse(content=MAIN_OUTPUT, model="main")
+
+        with patch.dict("os.environ", {"NVIDIA_API_KEY": "test-key"}):
+            iorails = IORails(RailsConfig.from_content(config=config_dict))
+        async with iorails:
+            _install_iorails_action(iorails, "mask sensitive data on input", RailDirection.INPUT, _redact_user)
+            iorails.engine_registry.model_call = AsyncMock(side_effect=_capture_iorails_messages)
+            iorails_content = _assistant_content(await iorails.generate_async(messages=messages))
+
+        assert llmrails_content == MAIN_OUTPUT
+        assert iorails_content == MAIN_OUTPUT
+        assert llm_prompts, "LLMRails main model was not called"
+        assert "SECRET" not in llm_prompts[-1]
+        assert "[REDACTED]" in llm_prompts[-1]
+        assert iorails_messages[-1][-1]["content"] == REDACTED_INPUT
+        assert "SECRET" not in iorails_messages[-1][-1]["content"]

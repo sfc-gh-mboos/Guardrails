@@ -78,6 +78,9 @@ class RailResult:
     verdict, so they are excluded from equality and hashing (``compare=False``) — two
     results with the same ``is_safe``/``reason``/``triggered_rail`` compare equal
     regardless of captured log data.
+
+    ``rewritten_user_message`` and ``rewritten_bot_message`` carry a TRANSFORM rewrite
+    the caller must apply. They are part of the result, not log metadata.
     """
 
     is_safe: bool
@@ -85,6 +88,8 @@ class RailResult:
     triggered_rail: str | None = None
     records: tuple[RailCallRecord, ...] = field(default=(), compare=False)
     return_value: Any = field(default=None, compare=False)
+    rewritten_user_message: str | None = None
+    rewritten_bot_message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

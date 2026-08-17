@@ -261,14 +261,14 @@ class TestCompilation:
         with pytest.raises(RailCompilationError, match="model_name"):
             compile_rail(CONTENT_SAFETY_INPUT, RailDirection.INPUT, deps)
 
-    def test_context_binding_surfaces_do_not_compile(self, deps):
-        """A surface using a context binding is refused rather than silently misbehaving.
+    def test_context_binding_surfaces_compile_when_the_key_is_fillable(self, deps):
+        """A ``user_message`` context binding compiles; request-time injection fills it."""
+        assert compile_rail("mask sensitive data on input", RailDirection.INPUT, deps) is not None
 
-        Context bindings name a specific action parameter (``user_message`` into ``text``),
-        which request-time injection does not fill.
-        """
+    def test_retrieval_context_binding_surfaces_do_not_compile(self, deps):
+        """A ``relevant_chunks`` context binding is refused; IORails has no retrieval source."""
         with pytest.raises(RailCompilationError, match="context binding"):
-            compile_rail("detect pii on input", RailDirection.INPUT, deps)
+            compile_rail("detect pii on retrieval", RailDirection.RETRIEVAL, deps)
 
     def test_an_action_with_a_kwargs_catch_all_accepts_any_binding(self, deps, monkeypatch):
         """A ``**kwargs`` action is not refused, because it genuinely accepts the keyword.
@@ -354,10 +354,14 @@ class TestUnrunnableSurfaces:
 
         assert unsupported_surface_reason(surface) is None
 
-    def test_transform_surfaces_do_not_compile(self, deps):
-        """A surface that rewrites content is refused until IORails can apply the rewrite."""
+    def test_input_transform_surfaces_compile(self, deps):
+        """A surface that rewrites the user turn compiles now that IORails can apply it."""
+        assert compile_rail("autoalign check input", RailDirection.INPUT, deps) is not None
+
+    def test_retrieval_transform_surfaces_do_not_compile(self, deps):
+        """A surface that rewrites retrieved chunks is refused; IORails has no retrieval source."""
         with pytest.raises(RailCompilationError, match="transform"):
-            compile_rail("autoalign check input", RailDirection.INPUT, deps)
+            compile_rail("regex check retrieval", RailDirection.RETRIEVAL, deps)
 
     @pytest.mark.parametrize(
         "direction, flow",
@@ -405,6 +409,10 @@ class TestUnservableReason:
     def test_a_shipped_surface_reports_no_reason(self):
         """The control: a runnable flow yields None, so the reason above is not unconditional."""
         assert unservable_reason(CONTENT_SAFETY_INPUT, RailDirection.INPUT) is None
+
+    def test_an_input_transform_surface_reports_no_reason(self):
+        """A user-turn rewrite is servable, so engine selection can keep it on IORails."""
+        assert unservable_reason("autoalign check input", RailDirection.INPUT) is None
 
 
 class TestManifestBindingContract:
@@ -489,6 +497,25 @@ class TestBindingResolution:
         await rail.run(USER_MESSAGES, bot_response="the reply")
 
         assert action.kwargs["context"]["bot_message"] == "the reply"
+
+    @pytest.mark.asyncio
+    async def test_context_binding_fills_text_from_the_user_turn(self, deps, monkeypatch):
+        """A manifest ``context`` binding copies ``user_message`` into the action's ``text``."""
+
+        async def masking_action(source, text, config):
+            return RailOutcome.allow()
+
+        action = RecordingAction(signature_of=masking_action)
+        monkeypatch.setattr(CONTENT_SAFETY_ACTION, action)
+        surface = synthetic_surface(
+            CONTENT_SAFETY_ACTION_REF,
+            (Binding.literal("source", "input"), Binding.context("text", "user_message")),
+        )
+
+        await compile_rail(SYNTHETIC_FLOW, RailDirection.INPUT, deps, catalog=StubCatalog(surface)).run(USER_MESSAGES)
+
+        assert action.kwargs["text"] == "hello there"
+        assert action.kwargs["source"] == "input"
 
 
 class TestDependencyInjection:
