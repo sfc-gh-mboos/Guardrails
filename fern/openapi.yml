@@ -261,13 +261,13 @@ paths:
       operationId: getRoot
       tags:
         - Health
-      summary: Get server health or chat UI
+      summary: Get playground or server health
       description: |
-        Returns a health payload when the chat UI is disabled. Otherwise, serves
-        the interactive chat interface.
+        Serves the prompt playground when the UI is enabled. Returns a health
+        payload when the UI is disabled with `--disable-chat-ui`.
       responses:
         "200":
-          description: Health payload or chat UI HTML.
+          description: Playground HTML or health payload.
           content:
             application/json:
               schema:

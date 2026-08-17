@@ -32,7 +32,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.exceptions import ExceptionMiddleware
-from starlette.responses import JSONResponse, RedirectResponse, StreamingResponse
+from starlette.responses import FileResponse, JSONResponse, StreamingResponse
+from starlette.staticfiles import StaticFiles
 
 from nemoguardrails import LLMRails, RailsConfig, utils
 from nemoguardrails.exceptions import InvalidStateError, LLMCallException, StreamingNotSupportedError
@@ -821,14 +822,27 @@ def register_challenges(additional_challenges: List[dict]):
     challenges.extend(additional_challenges)
 
 
+_UI_DIR = os.path.join(os.path.dirname(__file__), "ui")
+_EXAMPLE_PROMPTS_PATH = os.path.join(_UI_DIR, "example-prompts.json")
+
+
+def load_builtin_example_prompts() -> List[dict]:
+    """Return the shipped example prompt bank used by the playground."""
+    with open(_EXAMPLE_PROMPTS_PATH, encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, list):
+        raise ValueError("example-prompts.json must contain a JSON array")
+    return data
+
+
 @app.get(
     "/v1/challenges",
     summary="Get list of available challenges.",
 )
 async def get_challenges():
-    """Returns the list of available challenges for red teaming."""
+    """Returns registered challenges, or the built-in example prompt bank."""
 
-    return challenges
+    return challenges if challenges else load_builtin_example_prompts()
 
 
 def register_datastore(datastore_instance: DataStore):
@@ -927,18 +941,29 @@ class GuardrailsConfigurationError(Exception):
 # register_exception(app)
 
 
-if not app.disable_chat_ui and mount_chainlit is not None:
-    chainlit_app_path = os.path.join(os.path.dirname(__file__), "app.py")
-    mount_chainlit(app=app, target=chainlit_app_path, path="/chat")
+def register_server_ui(application: GuardrailsApp) -> None:
+    """Serve the prompt playground at `/` and optionally mount the Chainlit chat UI."""
+    if application.disable_chat_ui:
 
-    @app.get("/")
-    async def root_redirect():
-        return RedirectResponse(url="chat")
+        @application.get("/")
+        async def root_handler():
+            return {"status": "ok"}
 
-else:
-    if not app.disable_chat_ui and mount_chainlit is None:
-        log.warning("Chainlit is not installed; chat UI disabled. Install with: pip install nemoguardrails[chat-ui]")
+        return
 
-    @app.get("/")
-    async def root_handler():
-        return {"status": "ok"}
+    @application.get("/")
+    async def root_playground():
+        return FileResponse(os.path.join(_UI_DIR, "index.html"), media_type="text/html")
+
+    application.mount("/ui", StaticFiles(directory=_UI_DIR), name="ui")
+
+    if mount_chainlit is not None:
+        chainlit_app_path = os.path.join(os.path.dirname(__file__), "app.py")
+        mount_chainlit(app=application, target=chainlit_app_path, path="/chat")
+    else:
+        log.warning(
+            "Chainlit is not installed; conversation chat UI disabled. Install with: pip install nemoguardrails[chat-ui]"
+        )
+
+
+register_server_ui(app)

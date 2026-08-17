@@ -142,7 +142,7 @@ def server(
     ),
     disable_chat_ui: bool = typer.Option(
         default=False,
-        help="Weather the ChatUI should be disabled",
+        help="Disable the playground and Chat UI.",
     ),
     auto_reload: bool = typer.Option(default=False, help="Enable auto reload option."),
     prefix: str = typer.Option(

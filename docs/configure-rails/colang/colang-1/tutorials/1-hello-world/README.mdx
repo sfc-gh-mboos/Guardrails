@@ -213,7 +213,7 @@ According to the latest estimates, the population of Paris is around 2.2 million
 
 ## Server and Chat UI
 
-You can also test a guardrails configuration using the NeMo Guardrails server and the Chat UI.
+You can also test a guardrails configuration using the NeMo Guardrails server and the playground.
 
 To start the server, run the following command from the root directory of your project (the parent of the *config* folder):
 
@@ -226,7 +226,8 @@ INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
 ```
 
-The Chat UI interface is now available at `http://localhost:8000`:
+The playground is available at `http://localhost:8000`. Use it to confirm the prompt you send, the guarded output, and which rails activated.
+If you installed the `chat-ui` extra, the conversation Chat UI is available at `http://localhost:8000/chat`:
 
 ![NeMo Guardrails Chat UI showing the Hello World configuration](../../../../../_static/images/hello-world-server-ui.png)
 
