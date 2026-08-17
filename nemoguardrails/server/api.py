@@ -29,6 +29,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.exceptions import ExceptionMiddleware
@@ -349,6 +350,27 @@ llm_rails_instances: dict[str, LLMRails] = {}
 llm_rails_events_history_cache: dict[str, dict] = {}
 
 
+_PLAYGROUND_DIR = os.path.join(os.path.dirname(__file__), "ui")
+_PROMPTS_PATH = os.path.join(_PLAYGROUND_DIR, "prompts.json")
+
+
+def _playground_available() -> bool:
+    return not app.disable_chat_ui and os.path.isdir(_PLAYGROUND_DIR)
+
+
+def _default_example_prompts() -> List[dict]:
+    if not os.path.exists(_PROMPTS_PATH):
+        return []
+    with open(_PROMPTS_PATH) as f:
+        return json.load(f)
+
+
+def _request_model_name(body: Union[GuardrailsChatCompletionRequest, GuardrailCheckRequest]) -> Optional[str]:
+    if body.guardrails.preserve_config_model:
+        return None
+    return body.model
+
+
 def _has_config_file(path: str) -> bool:
     """Check if a directory (or its 'config' subdirectory) contains a config.yml/yaml."""
     for candidate in [path, os.path.join(path, "config")]:
@@ -596,7 +618,7 @@ async def chat_completion(body: GuardrailsChatCompletionRequest, request: Reques
     _validate_public_state_shape(body.guardrails.state)
 
     try:
-        llm_rails = await _get_rails(config_ids, model_name=body.model)
+        llm_rails = await _get_rails(config_ids, model_name=_request_model_name(body))
 
     except ValueError as ex:
         log.exception(ex)
@@ -784,7 +806,7 @@ async def guardrail_check(body: GuardrailCheckRequest, request: Request):
                 detail="No guardrails config_id provided and server has no default configuration",
             )
     try:
-        llm_rails = await _get_rails(config_ids, model_name=body.model)
+        llm_rails = await _get_rails(config_ids, model_name=_request_model_name(body))
     except ValueError as ex:
         log.exception(ex)
         raise HTTPException(status_code=422, detail=str(ex))
@@ -828,7 +850,7 @@ def register_challenges(additional_challenges: List[dict]):
 async def get_challenges():
     """Returns the list of available challenges for red teaming."""
 
-    return challenges
+    return challenges or _default_example_prompts()
 
 
 def register_datastore(datastore_instance: DataStore):
@@ -927,6 +949,9 @@ class GuardrailsConfigurationError(Exception):
 # register_exception(app)
 
 
+if _playground_available():
+    app.mount("/playground", StaticFiles(directory=_PLAYGROUND_DIR, html=True), name="playground")
+
 if not app.disable_chat_ui and mount_chainlit is not None:
     chainlit_app_path = os.path.join(os.path.dirname(__file__), "app.py")
     mount_chainlit(app=app, target=chainlit_app_path, path="/chat")
@@ -941,4 +966,6 @@ else:
 
     @app.get("/")
     async def root_handler():
+        if _playground_available():
+            return RedirectResponse(url="/playground/")
         return {"status": "ok"}
