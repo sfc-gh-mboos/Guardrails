@@ -23,7 +23,7 @@ tags:
   - name: Challenges
     description: List registered red teaming challenges.
   - name: Health
-    description: Check server health or load the chat UI.
+    description: Check server health or load the prompt playground and chat UI.
 paths:
   /v1/chat/completions:
     post:
@@ -256,15 +256,32 @@ paths:
                     example: pass
               example:
                 status: pass
+  /playground:
+    get:
+      operationId: getPlayground
+      tags:
+        - Health
+      summary: Open the prompt playground
+      description: |
+        Serves the prompt playground used to inspect input, output, and rail impact.
+        Disabled when `--disable-chat-ui` is set.
+      responses:
+        "200":
+          description: Prompt playground HTML.
+          content:
+            text/html:
+              schema:
+                type: string
   /:
     get:
       operationId: getRoot
       tags:
         - Health
-      summary: Get server health or chat UI
+      summary: Get server health, playground, or chat UI
       description: |
-        Returns a health payload when the chat UI is disabled. Otherwise, serves
-        the interactive chat interface.
+        Redirects to the Chat UI when the `chat-ui` extra is installed.
+        Otherwise serves the prompt playground. Returns `{"status": "ok"}` when
+        testing UIs are disabled with `--disable-chat-ui`.
       responses:
         "200":
           description: Health payload or chat UI HTML.
@@ -386,6 +403,12 @@ components:
           type: object
           additionalProperties: true
           description: Colang 1.0 transcript state for continuing a previous interaction.
+        preserve_config_model:
+          type: boolean
+          default: false
+          description: >
+            If true, keep the configuration's main model instead of replacing it
+            with the request `model` and `MAIN_MODEL_ENGINE`.
     GenerationOptions:
       type: object
       properties:

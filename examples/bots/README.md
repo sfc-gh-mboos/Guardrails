@@ -2,5 +2,13 @@
 
 The examples in this folder showcase various configurations of guardrails. You can use them as a starting point for different types of bots you want to build with NeMo Guardrails.
 
+To inspect prompt input, output, and rail impact in a browser, start the server and open the playground:
+
+```bash
+nemoguardrails server --config examples/bots
+```
+
+Then open `http://localhost:8000/playground`.
+
 1. [Hello World](./hello_world): basic starter configuration.
 2. [ABC Bot](./abc): more advanced configuration using topical rails, input and output moderation and retrieval augmented generation, etc.

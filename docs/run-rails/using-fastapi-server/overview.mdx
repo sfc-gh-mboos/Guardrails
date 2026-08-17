@@ -14,7 +14,7 @@ The NVIDIA NeMo Guardrails library API server provides the following capabilitie
 - Loads guardrails configurations at startup.
 - Exposes an [OpenAI-compatible REST API](https://platform.openai.com/docs/api-reference/chat/create) for chat completions and model listing.
 - Works with the [OpenAI Python SDK](https://github.com/openai/openai-python). Use `OpenAI(base_url="http://localhost:8000/v1")`.
-- Includes a built-in chat UI for testing.
+- Includes a built-in prompt playground and chat UI for testing.
 - Supports multiple configurations and combines them for each request.
 
 ## Quick Start
@@ -82,9 +82,14 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   }'
 ```
 
+### View the Prompt Playground
+
+Open `http://localhost:8000/playground` to inspect prompt input, guarded output, and rail impact.
+If the Chat UI extra is not installed, `http://localhost:8000` serves the same playground.
+
 ### View the Chat UI
 
-Open `http://localhost:8000` in your browser to access the built-in chat UI for testing.
+When the `chat-ui` extra is installed, open `http://localhost:8000/chat` for the conversational Chat UI.
 
 ## Related Topics
 

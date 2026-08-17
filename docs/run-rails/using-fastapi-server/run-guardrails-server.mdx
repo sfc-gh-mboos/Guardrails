@@ -10,7 +10,7 @@ content:
 ---
 
 The NeMo Guardrails server loads configurations from a local directory at startup and exposes an HTTP API to use them.
-The server uses [FastAPI](https://fastapi.tiangolo.com/) and includes a built-in Chat UI for testing.
+The server uses [FastAPI](https://fastapi.tiangolo.com/) and includes a built-in prompt playground and Chat UI for testing.
 
 ## Start the Server
 
@@ -214,17 +214,34 @@ export NEMO_GUARDRAILS_SERVER_ALLOWED_ORIGINS=http://localhost:3000,https://myap
 nemoguardrails server --config ./configs
 ```
 
-## Chat UI
+## Prompt Playground
 
-The server includes a built-in Chat UI for testing guardrails configurations.
-Access it at `http://localhost:8000/` after starting the server.
+The server includes a prompt playground at `http://localhost:8000/playground`.
+Use it to send a prompt, confirm the input and guarded output, and inspect which rails activated or blocked the turn.
+
+The playground ships with a bank of example prompts (allowed, jailbreak, harmful, PII, output-rail, and off-topic).
+When no `challenges.json` is registered next to your configs, `GET /v1/challenges` returns that same bank.
+
+To try the playground without an LLM API key, start the server with the bundled `playground` config:
+
+```bash
+nemoguardrails server --config examples/configs --default-config-id playground
+```
+
+Keep **Use the configuration's main model** checked. That sets `guardrails.preserve_config_model` so the request does not replace the demo `playground_echo` model.
 
 <Info>
 
-The Chat UI is for internal testing only.
-For production deployments, disable it using the `--disable-chat-ui` flag.
+The playground and Chat UI are for internal testing only.
+For production deployments, disable them using the `--disable-chat-ui` flag.
 
 </Info>
+
+## Chat UI
+
+The server includes a built-in Chat UI for conversational testing.
+When the `chat-ui` extra is installed, it is available at `http://localhost:8000/chat`, and `http://localhost:8000/` redirects there.
+If Chainlit is not installed, `http://localhost:8000/` serves the prompt playground instead.
 
 ## Health Check
 

@@ -612,7 +612,7 @@ navigation:
                 title: Health Check (Alias)
                 slug: get-healthz
               - endpoint: GET /
-                title: Get Server Health or Chat UI
+                title: Get Server Health, Playground, or Chat UI
                 slug: get-root
       - page: Migrating to 0.22
         path: migration/0.22.mdx
