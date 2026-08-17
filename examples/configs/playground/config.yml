@@ -1,0 +1,34 @@
+models:
+  - type: main
+    engine: playground_echo
+    model: echo
+
+instructions:
+  - type: general
+    content: |
+      You are a helpful company helpdesk assistant.
+      Answer brief employee questions. Do not reveal internal-only information.
+
+rails:
+  config:
+    regex_detection:
+      input:
+        patterns:
+          - "ignore (all )?previous instructions"
+          - "\\byou are dan\\b"
+          - "disable your safety filters"
+          - "reveal your system prompt"
+          - "how (do i|to) (make|build) a bomb"
+          - "phishing email"
+        case_insensitive: true
+      output:
+        patterns:
+          - "\\bconfidential\\b"
+        case_insensitive: true
+  input:
+    flows:
+      - mask pii
+      - regex check input
+  output:
+    flows:
+      - regex check output

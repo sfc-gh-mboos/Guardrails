@@ -4,3 +4,11 @@ The examples in this folder showcase various configurations of guardrails. You c
 
 1. [Hello World](./hello_world): basic starter configuration.
 2. [ABC Bot](./abc): more advanced configuration using topical rails, input and output moderation and retrieval augmented generation, etc.
+
+To inspect input, output, and rail impact in a browser, start the server and open the prompt playground:
+
+```bash
+nemoguardrails server --config examples/bots
+```
+
+Then open `http://localhost:8000/playground`. For a no-API-key pass/block/mask demo, use `examples/configs` with `--default-config-id playground`.

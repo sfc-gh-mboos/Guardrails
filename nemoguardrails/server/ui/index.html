@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Prompt playground</title>
+    <link rel="stylesheet" href="/playground/styles.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div>
+        <p class="eyebrow">NeMo Guardrails</p>
+        <h1>Prompt playground</h1>
+        <p class="lede">
+          Confirm the prompt that goes in, the text that comes out, and which rails changed the turn.
+        </p>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel" aria-labelledby="input-heading">
+        <h2 id="input-heading">Prompt</h2>
+
+        <label for="config-id">Configuration</label>
+        <select id="config-id"></select>
+
+        <p class="hint" id="examples-label">Example prompts</p>
+        <div id="categories" class="chips" role="tablist" aria-label="Prompt categories"></div>
+        <div id="examples" class="examples" role="list" aria-labelledby="examples-label"></div>
+
+        <label for="prompt">Input</label>
+        <textarea id="prompt" rows="6" placeholder="Type a prompt or pick an example."></textarea>
+        <p id="prompt-note" class="hint"></p>
+
+        <label class="check">
+          <input type="checkbox" id="compare" checked />
+          Compare with rails turned off
+        </label>
+
+        <button id="run" type="button">Run prompt</button>
+        <p id="status" class="status" role="status"></p>
+      </section>
+
+      <section class="panel results" aria-labelledby="results-heading">
+        <h2 id="results-heading">Confirmed turn</h2>
+        <div id="results" class="empty">Run a prompt to see the input, output, and rail impact.</div>
+      </section>
+    </main>
+
+    <script src="/playground/app.js"></script>
+  </body>
+</html>

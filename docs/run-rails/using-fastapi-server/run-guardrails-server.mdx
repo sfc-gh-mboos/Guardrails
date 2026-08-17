@@ -10,7 +10,7 @@ content:
 ---
 
 The NeMo Guardrails server loads configurations from a local directory at startup and exposes an HTTP API to use them.
-The server uses [FastAPI](https://fastapi.tiangolo.com/) and includes a built-in Chat UI for testing.
+The server uses [FastAPI](https://fastapi.tiangolo.com/) and includes a built-in prompt playground and Chat UI for testing.
 
 ## Start the Server
 
@@ -214,15 +214,32 @@ export NEMO_GUARDRAILS_SERVER_ALLOWED_ORIGINS=http://localhost:3000,https://myap
 nemoguardrails server --config ./configs
 ```
 
+## Prompt Playground
+
+The server includes a simple prompt playground at `http://localhost:8000/playground`.
+Use it to confirm the input you send, the guarded output, and which rails blocked or transformed the turn.
+
+The playground ships with an example prompt bank covering allowed, jailbreak, harmful, PII/mask, output-rail, and off-topic cases.
+The `examples/configs/playground` configuration uses catalog regex rails, a PII mask action, and a canned echo model, so you can exercise pass, block, and rewrite paths without an LLM API key:
+
+```bash
+nemoguardrails server --config examples/configs --default-config-id playground
+```
+
+Open `http://localhost:8000/playground`. You can deep-link an example with `?prompt=<id>`, for example `?prompt=jailbreak-ignore`.
+The playground sends `guardrails.preserve_config_model: true` so `/v1/chat/completions` keeps the configuration's main model instead of replacing it with `MAIN_MODEL_ENGINE`.
+
+When the Chainlit chat UI extra is not installed, `GET /` redirects to the playground.
+
 ## Chat UI
 
 The server includes a built-in Chat UI for testing guardrails configurations.
-Access it at `http://localhost:8000/` after starting the server.
+Access it at `http://localhost:8000/` after starting the server when the `chat-ui` extra is installed.
 
 <Info>
 
-The Chat UI is for internal testing only.
-For production deployments, disable it using the `--disable-chat-ui` flag.
+The Chat UI and prompt playground are for internal testing only.
+For production deployments, disable them using the `--disable-chat-ui` flag.
 
 </Info>
 
@@ -240,7 +257,7 @@ curl http://localhost:8000/v1/health
 ```
 
 The check is intentionally shallow: it reflects only that the server process is up, and does not verify guardrails configurations, the model provider, or any datastore.
-Use this endpoint rather than `GET /` for health probes, because `GET /` redirects to the chat UI when the UI is enabled.
+Use this endpoint rather than `GET /` for health probes, because `GET /` redirects to the chat UI or prompt playground when those UIs are enabled.
 When the server runs behind a path prefix (`--prefix`), the endpoints are served at `<prefix>/v1/health` and `<prefix>/healthz`.
 
 ## Related Topics
