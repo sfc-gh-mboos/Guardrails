@@ -258,7 +258,8 @@
         const tbody = document.createElement("tbody");
         rails.forEach((rail) => {
           const tr = document.createElement("tr");
-          const impact = rail.stop ? "blocked" : "ran";
+          const transformed = (rail.executed_actions || []).some((action) => action.return_value && action.return_value.decision === "transform");
+          const impact = rail.stop ? "blocked" : transformed ? "modified" : "ran";
           [rail.type, rail.name, impact, (rail.decisions || []).join(", ") || "—", rail.duration != null ? Number(rail.duration).toFixed(3) + "s" : "—"].forEach((value) => {
             const td = document.createElement("td");
             text(td, value);
