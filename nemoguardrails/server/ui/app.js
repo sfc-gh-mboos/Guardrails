@@ -254,7 +254,6 @@ function buildRequest(prompt, railsEnabled) {
     options.rails = {
       input: false,
       output: false,
-      dialog: false,
       retrieval: false,
       tool_input: false,
       tool_output: false,
