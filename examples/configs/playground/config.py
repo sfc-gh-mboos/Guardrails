@@ -1,24 +1,46 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from typing import Any, AsyncIterator, List, Optional, Union
 
 from nemoguardrails.llm.providers import register_provider
 from nemoguardrails.types import ChatMessage, LLMResponse, LLMResponseChunk
 
-OUTPUT_RAIL_TRIGGER = "confidential"
+OUTPUT_RAIL_TRIGGER = "include the word confidential"
 
 
 def _prompt_text(prompt: Union[str, List[ChatMessage]]) -> str:
-    if isinstance(prompt, str):
-        return prompt
-    for message in reversed(prompt):
-        role = message.role if isinstance(message, ChatMessage) else message.get("role")
-        content = message.content if isinstance(message, ChatMessage) else message.get("content")
-        if role == "user" and content:
-            return str(content)
-    if not prompt:
-        return ""
-    last = prompt[-1]
-    content = last.content if isinstance(last, ChatMessage) else last.get("content", "")
-    return str(content or "")
+    if isinstance(prompt, list):
+        for message in reversed(prompt):
+            role = message.role if isinstance(message, ChatMessage) else message.get("role")
+            content = message.content if isinstance(message, ChatMessage) else message.get("content")
+            if role == "user" and content:
+                return str(content)
+        if not prompt:
+            return ""
+        last = prompt[-1]
+        content = last.content if isinstance(last, ChatMessage) else last.get("content", "")
+        return str(content or "")
+
+    text = str(prompt)
+    lowered = text.lower()
+    for marker in ("\nuser:", '\nuser "'):
+        idx = lowered.rfind(marker)
+        if idx != -1:
+            return text[idx + len(marker) :]
+    return text
 
 
 class PlaygroundEchoLLM:
