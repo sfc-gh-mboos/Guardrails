@@ -52,6 +52,7 @@ def test_playground_static_assets_are_served():
     assert js.status_code == 200
     assert "chat/completions" in js.text
     assert "activated_rails" in js.text
+    assert "One or both runs failed" in js.text
     assert css.status_code == 200
     assert "--accent" in css.text
 

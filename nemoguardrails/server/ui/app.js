@@ -305,10 +305,14 @@
     if (compared) {
       const left = withRails ? assistantText(withRails) : "";
       const right = withoutRails ? assistantText(withoutRails) : "";
-      const changed = !withError && !withoutError && left !== right;
-      const banner = changed
-        ? '<p class="hint">Rails changed the output compared with the unguarded run.</p>'
-        : '<p class="hint">Rails did not change the visible output for this prompt.</p>';
+      let banner;
+      if (withError || withoutError) {
+        banner = '<p class="hint">One or both runs failed. Compare the columns below.</p>';
+      } else if (left !== right) {
+        banner = '<p class="hint">Rails changed the output compared with the unguarded run.</p>';
+      } else {
+        banner = '<p class="hint">Rails did not change the visible output for this prompt.</p>';
+      }
       els.results.innerHTML =
         banner +
         '<div class="compare-grid">' +
