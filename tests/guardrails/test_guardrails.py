@@ -383,14 +383,12 @@ class TestIORailsUnsupportedReason:
         assert reason is not None
         assert "retrieval" in reason
 
-    def test_a_transform_flow_routes_to_llmrails(self):
-        """A rewrite-capable surface is refused at selection, not run as an allow."""
+    def test_a_transform_flow_is_handled_by_iorails(self):
+        """A rewrite-capable input surface is in scope once IORails can apply the rewrite."""
         config = _make_iorails_config(rails={"input": {"flows": ["autoalign check input"]}})
 
-        reason = IORails.unsupported_reason(config, llm=None)
-
-        assert reason is not None
-        assert "transform" in reason
+        assert IORails.unsupported_reason(config, llm=None) is None
+        assert IORails.can_handle(config, llm=None) is True
 
     def test_unsupported_output_flow_reports_offender(self):
         """An output flow outside the IORails-supported set is named in the reason."""
@@ -409,8 +407,7 @@ class TestIORailsUnsupportedReason:
         [
             (
                 "activefence moderation on input detailed",
-                "'activefence moderation on input detailed' declares context binding(s) for 'text', "
-                "which manifest-driven execution does not fill yet",
+                "config has unsupported input flows: ['activefence moderation on input detailed']",
             ),
             (
                 "gcpnlp moderation detailed",
