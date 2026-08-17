@@ -29,10 +29,11 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.exceptions import ExceptionMiddleware
-from starlette.responses import JSONResponse, RedirectResponse, StreamingResponse
+from starlette.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 
 from nemoguardrails import LLMRails, RailsConfig, utils
 from nemoguardrails.exceptions import InvalidStateError, LLMCallException, StreamingNotSupportedError
@@ -359,6 +360,34 @@ def _has_config_file(path: str) -> bool:
     return False
 
 
+_PLAYGROUND_DIR = os.path.join(os.path.dirname(__file__), "ui")
+
+
+def _playground_available() -> bool:
+    return (not app.disable_chat_ui) and os.path.isfile(os.path.join(_PLAYGROUND_DIR, "index.html"))
+
+
+def _playground_index() -> FileResponse:
+    return FileResponse(os.path.join(_PLAYGROUND_DIR, "index.html"))
+
+
+def _default_example_prompts() -> List[dict]:
+    prompts_path = os.path.join(_PLAYGROUND_DIR, "prompts.json")
+    if not os.path.isfile(prompts_path):
+        return []
+    with open(prompts_path, encoding="utf-8") as handle:
+        payload = json.load(handle)
+    return payload if isinstance(payload, list) else []
+
+
+def _request_model_name(
+    body: Union[GuardrailsChatCompletionRequest, GuardrailCheckRequest],
+) -> Optional[str]:
+    if body.guardrails.preserve_config_model:
+        return None
+    return body.model
+
+
 def _generate_cache_key(config_ids: List[str], model_name: Optional[str] = None) -> str:
     """Generates a cache key for the given config ids and model name."""
     key = "-".join(config_ids)
@@ -596,7 +625,7 @@ async def chat_completion(body: GuardrailsChatCompletionRequest, request: Reques
     _validate_public_state_shape(body.guardrails.state)
 
     try:
-        llm_rails = await _get_rails(config_ids, model_name=body.model)
+        llm_rails = await _get_rails(config_ids, model_name=_request_model_name(body))
 
     except ValueError as ex:
         log.exception(ex)
@@ -784,7 +813,7 @@ async def guardrail_check(body: GuardrailCheckRequest, request: Request):
                 detail="No guardrails config_id provided and server has no default configuration",
             )
     try:
-        llm_rails = await _get_rails(config_ids, model_name=body.model)
+        llm_rails = await _get_rails(config_ids, model_name=_request_model_name(body))
     except ValueError as ex:
         log.exception(ex)
         raise HTTPException(status_code=422, detail=str(ex))
@@ -828,7 +857,7 @@ def register_challenges(additional_challenges: List[dict]):
 async def get_challenges():
     """Returns the list of available challenges for red teaming."""
 
-    return challenges
+    return challenges or _default_example_prompts()
 
 
 def register_datastore(datastore_instance: DataStore):
@@ -927,6 +956,9 @@ class GuardrailsConfigurationError(Exception):
 # register_exception(app)
 
 
+if _playground_available():
+    app.mount("/playground", StaticFiles(directory=_PLAYGROUND_DIR, html=True), name="playground")
+
 if not app.disable_chat_ui and mount_chainlit is not None:
     chainlit_app_path = os.path.join(os.path.dirname(__file__), "app.py")
     mount_chainlit(app=app, target=chainlit_app_path, path="/chat")
@@ -941,4 +973,6 @@ else:
 
     @app.get("/")
     async def root_handler():
+        if _playground_available():
+            return _playground_index()
         return {"status": "ok"}

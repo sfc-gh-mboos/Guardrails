@@ -134,6 +134,13 @@ class GuardrailsDataInput(BaseModel):
         default=None,
         description="State object to continue the interaction.",
     )
+    preserve_config_model: bool = Field(
+        default=False,
+        description=(
+            "If true, keep the configuration's main model instead of replacing it "
+            "with the request `model` and MAIN_MODEL_ENGINE."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod

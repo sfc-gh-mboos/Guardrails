@@ -1,0 +1,321 @@
+:root {
+  color-scheme: dark;
+  --bg: #14120b;
+  --fg: #edecec;
+  --fg-muted: rgba(237, 236, 236, 0.6);
+  --accent: #f54e00;
+  --card: #1b1913;
+  --card-01: #1d1b15;
+  --card-02: #201e18;
+  --card-03: #26241e;
+  --card-04: #2b2923;
+  --allow: #7dcea0;
+  --block: #f54e00;
+  --warn: #e6c07b;
+  --line: rgba(237, 236, 236, 0.12);
+  --radius: 12px;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+body {
+  padding: 32px;
+}
+
+.topbar {
+  max-width: 1280px;
+  margin: 0 auto 28px;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  color: var(--accent);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1,
+h2 {
+  margin: 0;
+  font-weight: 600;
+}
+
+h1 {
+  font-size: 32px;
+}
+
+h2 {
+  font-size: 16px;
+}
+
+.lede,
+.hint,
+.empty,
+.status {
+  color: var(--fg-muted);
+  line-height: 1.5;
+}
+
+.lede {
+  max-width: 720px;
+  margin: 10px 0 0;
+}
+
+.layout {
+  max-width: 1280px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(280px, 1fr) minmax(320px, 1.2fr);
+  gap: 16px;
+}
+
+.panel {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px;
+  min-height: 0;
+}
+
+.panel-header {
+  margin-bottom: 14px;
+}
+
+.hint {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.filters button,
+.prompt-card,
+#run {
+  border: 1px solid var(--line);
+  background: var(--card-02);
+  color: var(--fg);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.filters button {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.filters button[aria-selected="true"],
+.prompt-card.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.prompt-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 68vh;
+  overflow: auto;
+}
+
+.prompt-card {
+  display: block;
+  width: 100%;
+  border-radius: 10px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.prompt-card strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.prompt-card span,
+.badge {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+label,
+.prompt-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--card-01);
+  color: var(--fg);
+  border-radius: 8px;
+  padding: 10px;
+  font: inherit;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 140px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.check input {
+  width: auto;
+}
+
+#run {
+  margin-left: auto;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-weight: 600;
+}
+
+#run:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.status {
+  min-height: 1.4em;
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+
+.results-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.result-block {
+  background: var(--card-01);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.result-block h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.badge {
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: var(--card-03);
+}
+
+.badge.allow {
+  color: var(--allow);
+}
+
+.badge.block {
+  color: var(--block);
+}
+
+.badge.warn {
+  color: var(--warn);
+}
+
+.rail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.rail-table th,
+.rail-table td {
+  text-align: left;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.rail-table th {
+  color: var(--fg-muted);
+  font-weight: 500;
+}
+
+.error {
+  color: var(--block);
+}
+
+@media (max-width: 1100px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .prompt-list {
+    max-height: 320px;
+  }
+
+  #run {
+    margin-left: 0;
+  }
+}
