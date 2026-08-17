@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Guardrails Playground</title>
+    <link rel="stylesheet" href="ui/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div>
+          <h1>Guardrails Playground</h1>
+          <p>Confirm prompt input and output, and see which rails fired.</p>
+        </div>
+      </div>
+      <nav class="top-links">
+        <a href="chat" id="chat-link" hidden>Conversation UI</a>
+        <a href="docs" id="docs-link" hidden>API docs</a>
+      </nav>
+    </header>
+
+    <main class="layout">
+      <aside class="panel bank" aria-labelledby="bank-heading">
+        <div class="panel-header">
+          <h2 id="bank-heading">Example prompts</h2>
+          <p>Pick a prompt to inspect how rails treat it.</p>
+        </div>
+        <div class="filters" id="category-filters" role="tablist" aria-label="Prompt categories"></div>
+        <ul class="prompt-list" id="prompt-list"></ul>
+      </aside>
+
+      <section class="panel composer" aria-labelledby="composer-heading">
+        <div class="panel-header">
+          <h2 id="composer-heading">Input</h2>
+          <p>This is the user message sent to <code>/v1/chat/completions</code>.</p>
+        </div>
+
+        <div class="field-row">
+          <label for="config-id">Configuration</label>
+          <select id="config-id"></select>
+        </div>
+
+        <div class="field-row">
+          <label for="model-id">Model</label>
+          <input id="model-id" type="text" value="gpt-4o" autocomplete="off" />
+        </div>
+
+        <label class="sr-only" for="prompt-input">Prompt</label>
+        <textarea
+          id="prompt-input"
+          rows="8"
+          placeholder="Choose an example prompt or type your own…"
+        ></textarea>
+        <p class="hint" id="prompt-why" hidden></p>
+
+        <fieldset class="options">
+          <legend>Run options</legend>
+          <label><input type="checkbox" id="apply-rails" checked /> Apply rails</label>
+          <label><input type="checkbox" id="compare-rails" /> Compare with rails off</label>
+          <label><input type="checkbox" id="show-llm-calls" /> Include LLM call logs</label>
+        </fieldset>
+
+        <div class="actions">
+          <button type="button" id="run-button">Run prompt</button>
+          <p class="status" id="run-status" aria-live="polite"></p>
+        </div>
+      </section>
+
+      <section class="panel results" aria-labelledby="results-heading">
+        <div class="panel-header">
+          <h2 id="results-heading">Output and rail impact</h2>
+          <p>The assistant reply plus the rails that handled this prompt.</p>
+        </div>
+        <div id="results" class="results-body">
+          <p class="empty">Run a prompt to see the guarded output and which rails activated.</p>
+        </div>
+      </section>
+    </main>
+
+    <script src="ui/app.js"></script>
+  </body>
+</html>

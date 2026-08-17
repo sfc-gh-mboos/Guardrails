@@ -10,7 +10,7 @@ content:
 ---
 
 The NeMo Guardrails server loads configurations from a local directory at startup and exposes an HTTP API to use them.
-The server uses [FastAPI](https://fastapi.tiangolo.com/) and includes a built-in Chat UI for testing.
+The server uses [FastAPI](https://fastapi.tiangolo.com/) and includes a built-in playground for inspecting prompt input, output, and rail impact.
 
 ## Start the Server
 
@@ -214,15 +214,22 @@ export NEMO_GUARDRAILS_SERVER_ALLOWED_ORIGINS=http://localhost:3000,https://myap
 nemoguardrails server --config ./configs
 ```
 
-## Chat UI
+## Playground and Chat UI
 
-The server includes a built-in Chat UI for testing guardrails configurations.
-Access it at `http://localhost:8000/` after starting the server.
+The server includes a built-in playground for testing guardrails configurations.
+Open `http://localhost:8000/` after starting the server to:
+
+- Choose a configuration and a prompt from the example prompt bank.
+- Confirm the input that is sent to `/v1/chat/completions`.
+- Inspect the model output and the rails that activated, including stop decisions.
+- Optionally compare the same prompt with rails turned off.
+
+If you installed the `chat-ui` extra, the conversation Chat UI remains available at `http://localhost:8000/chat`.
 
 <Info>
 
-The Chat UI is for internal testing only.
-For production deployments, disable it using the `--disable-chat-ui` flag.
+The playground and Chat UI are for internal testing only.
+For production deployments, disable them using the `--disable-chat-ui` flag.
 
 </Info>
 
@@ -240,7 +247,7 @@ curl http://localhost:8000/v1/health
 ```
 
 The check is intentionally shallow: it reflects only that the server process is up, and does not verify guardrails configurations, the model provider, or any datastore.
-Use this endpoint rather than `GET /` for health probes, because `GET /` redirects to the chat UI when the UI is enabled.
+Use this endpoint rather than `GET /` for health probes, because `GET /` serves the playground when the UI is enabled.
 When the server runs behind a path prefix (`--prefix`), the endpoints are served at `<prefix>/v1/health` and `<prefix>/healthz`.
 
 ## Related Topics
