@@ -1,0 +1,30 @@
+define bot refuse to respond
+  "I'm sorry, I can't respond to that."
+
+define subflow check jailbreak input
+  $response = execute check_jailbreak_input
+  if $response.is_blocked
+    bot refuse to respond
+    stop
+
+define subflow check content safety input
+  $response = execute check_content_safety_input
+  if $response.is_blocked
+    bot refuse to respond
+    stop
+
+define subflow mask pii on input
+  $response = execute mask_pii_on_input
+  if $response.is_transform
+    $user_message = $response.transform_text["user_message"]
+
+define subflow check content safety output
+  $response = execute check_content_safety_output
+  if $response.is_blocked
+    bot refuse to respond
+    stop
+
+define subflow mask pii on output
+  $response = execute mask_pii_on_output
+  if $response.is_transform
+    $bot_message = $response.transform_text["bot_message"]
