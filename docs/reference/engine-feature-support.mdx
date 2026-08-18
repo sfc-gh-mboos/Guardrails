@@ -96,7 +96,7 @@ Input and output rails wrap the model call, dialog rails drive multi-turn conver
 Execution rails govern those custom actions; validating the model's own tool calls and tool results is covered separately under [Tool calling](#tool-calling).
 
 `IORails` runs input, output, and tool rails only, and it does so without the Colang runtime.
-Input rails run before the model call and output rails run after it, using a fixed set of built-in flows.
+Input rails run before the model call and output rails run after it.
 Dialog, retrieval, and execution rails are not available on `IORails`; configurations that use them fall back to `LLMRails`.
 
 ### Colang Language Support
@@ -122,9 +122,25 @@ A Colang 2.x configuration is a fallback condition: `Guardrails` routes it to `L
 Both engines support the built-in NeMoGuard safety models: content safety, topic control, and jailbreak detection.
 On `LLMRails` these run as Colang flows and can be placed on input or output as the configuration allows.
 
-`IORails` supports a fixed set of these flows per direction.
+`IORails` supports those NeMoGuard flows plus catalog rails that rewrite the user or bot turn (see [Transforms](#transforms)).
 On input it supports content safety, topic control, and jailbreak detection; on output it supports content safety only.
 A topic-control or jailbreak flow on the output rail is a fallback condition.
+
+### Transforms
+
+| Feature | LLMRails | IORails | Notes |
+|---|:---:|:---:|---|
+| Input rewrite (`user_message`) | ✓ | ✓ | Applied before the main model call |
+| Output rewrite (`bot_message`) | ✓ | ✓ | Applied to the returned assistant text |
+| Retrieval rewrite (`relevant_chunks`) | ✓ | ✗ | IORails has no retrieval context |
+| Streaming output rewrite | ✗ | ✗ | Streaming treats a transform as non-blocking and does not rewrite already-emitted chunks |
+
+Both engines apply `TRANSFORM` outcomes from catalog rails that mask or otherwise rewrite the active user or bot turn.
+On `LLMRails` the Colang flow writes `$user_message` or `$bot_message` from `RailOutcome.transform_text`.
+On `IORails`, `RailsManager` applies the same rewrite to the conversation messages or the assistant text.
+
+Retrieval-chunk transforms remain an `LLMRails` capability.
+Streaming output rails do not apply a rewrite on either engine; they still block when the rail returns `BLOCK`.
 
 ### Tool Calling
 
@@ -147,18 +163,18 @@ Tool calls are returned in the OpenAI-style `tool_calls` field of the response m
 | `generate` / `generate_async` | ✓ | ✓ | |
 | `stream_async` | ✓ | ✓ | |
 | Event-based API (`generate_events` / `process_events`) | ✓ | ✗ | Requires the Colang runtime |
-| `check` / `check_async` (rails-only validation) | ✓ | ✗ | LLMRails only |
+| `check` / `check_async` (rails-only validation) | ✓ | ✓ | Both engines apply input/output transforms |
 | `GenerationOptions` | ✓ | ◐ | IORails uses `llm_params` and rail toggles; no `log` or `output_data` |
 | `GenerationResponse` (structured response object) | ✓ | ✗ | IORails returns an OpenAI-style message dict |
 | `explain()` / `ExplainInfo` | ✓ | ✗ | LLMRails only |
 
-Both engines expose `generate`, `generate_async`, and `stream_async`.
+Both engines expose `generate`, `generate_async`, `stream_async`, `check`, and `check_async`.
 `LLMRails` can return a rich `GenerationResponse` and processes the full `GenerationOptions` object, including rail toggles, `llm_params`, logging options, and `output_data`.
-It also exposes the event-based API (`generate_events` and `process_events`), the rails-only validation methods (`check` and `check_async`), and `explain()` for debugging.
+It also exposes the event-based API (`generate_events` and `process_events`) and `explain()` for debugging.
 
 `IORails` returns an OpenAI-style message dictionary with `role`, `content`, and optional `tool_calls`, rather than a `GenerationResponse`.
 It accepts `GenerationOptions` but uses only `llm_params` and rail toggles.
-The event-based API, `check` and `check_async`, and `explain()` are not available; on the `Guardrails` facade these raise `NotImplementedError` when `IORails` is the active engine.
+The event-based API and `explain()` are not available; on the `Guardrails` facade these raise `NotImplementedError` when `IORails` is the active engine.
 
 ### Streaming
 
@@ -256,11 +272,12 @@ The knowledge base, embedding providers, and custom embedding or embedding-searc
 
 | Feature | LLMRails | IORails | Notes |
 |---|:---:|:---:|---|
-| Community integrations (PII, AlignScore, ActiveFence, and others) | ✓ | ✗ | Run as LLMRails actions and flows |
+| Community integrations (PII, AlignScore, ActiveFence, and others) | ✓ | ◐ | IORails runs input/output transform rails; retrieval and other catalog rails fall back |
 
 The community and third-party integrations in the [Guardrail Catalog](/configure-guardrails/guardrail-catalog) (for example, PII detection, AlignScore, ActiveFence, Fiddler, Pangea, and others) run as `LLMRails` actions and flows.
 
-`IORails` ships only the built-in NeMoGuard safety models and tool validation, so catalog integrations route to `LLMRails`.
+`IORails` runs the catalog rails that rewrite the user or bot turn, such as PII masking, Prompt Security, AutoAlign, CrowdStrike AIDR, Pangea, and injection detection.
+Retrieval-chunk transforms, fact-checking rails that need retrieved evidence, and catalog rails that only block without a transform still route to `LLMRails`.
 
 ### Server and Deployment
 

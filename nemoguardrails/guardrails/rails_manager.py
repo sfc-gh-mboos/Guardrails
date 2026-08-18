@@ -21,10 +21,15 @@ from collections.abc import Coroutine, Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Optional, TypeVar, Union
 
-from nemoguardrails.actions.rail_outcome import RailOutcome
+from nemoguardrails.actions.rail_outcome import RailOutcome, TransformTarget
 from nemoguardrails.guardrails.actions.tool_call_action import ToolCallRailAction
 from nemoguardrails.guardrails.actions.tool_result_action import ToolResultRailAction
-from nemoguardrails.guardrails.compiled_rail import CompiledRail, RailDependencies, compile_rail
+from nemoguardrails.guardrails.compiled_rail import (
+    CompiledRail,
+    RailDependencies,
+    compile_rail,
+    with_rewritten_user_message,
+)
 from nemoguardrails.guardrails.engine_registry import EngineRegistry
 from nemoguardrails.guardrails.guardrails_types import (
     RailCallRecord,
@@ -147,13 +152,28 @@ _HTTP_CLIENT_SURFACE_NAMES: frozenset[str] = frozenset(
 
 def _rail_result(outcome: RailOutcome) -> RailResult:
     """Map an engine-neutral rail verdict onto IORails' rail result."""
+    if outcome.is_blocked:
+        return RailResult(is_safe=False, reason=outcome.reason, return_value={"allowed": False, **outcome.metadata})
     if outcome.is_transform:
-        # Unreachable: transform surfaces are refused at compile time until IORails can apply a
-        # rewrite. Raising keeps it that way, because the alternative -- reading TRANSFORM as
-        # "not blocked" -- allows the request and discards the rewrite with nothing to see.
-        raise NotImplementedError(f"rail returned {outcome.decision.value!r}, which IORails cannot apply")
-    allowed = not outcome.is_blocked
-    return RailResult(is_safe=allowed, reason=outcome.reason, return_value={"allowed": allowed, **outcome.metadata})
+        unknown = [spec.target.value for spec in outcome.transforms if spec.target not in _APPLYABLE_TRANSFORM_TARGETS]
+        if unknown:
+            raise NotImplementedError(
+                f"rail returned {outcome.decision.value!r} of {unknown}, which IORails cannot apply"
+            )
+        text = outcome.transform_text
+        # Omit outcome.metadata: masking actions often embed the original sensitive
+        # text there, and return_value is copied into GenerationLog / UI payloads.
+        return RailResult(
+            is_safe=True,
+            reason=outcome.reason,
+            rewritten_user_message=text.get(TransformTarget.USER_MESSAGE.value),
+            rewritten_bot_message=text.get(TransformTarget.BOT_MESSAGE.value),
+            return_value={"allowed": True, "transforms": text},
+        )
+    return RailResult(is_safe=True, reason=outcome.reason, return_value={"allowed": True, **outcome.metadata})
+
+
+_APPLYABLE_TRANSFORM_TARGETS = frozenset({TransformTarget.USER_MESSAGE, TransformTarget.BOT_MESSAGE})
 
 
 def _model_free_record(flow: str, rail_type: str, result: RailResult) -> RailCallRecord:
@@ -331,15 +351,16 @@ class RailsManager:
         ``True`` (the default) runs all, ``False`` runs none, and a list runs only the
         named flows (matched on the normalized flow name). When parallel mode is enabled,
         all selected rails run concurrently and the first unsafe result cancels the rest.
+        Sequential mode applies each TRANSFORM to the user turn before the next rail runs.
         """
         active = self._enabled_flows(self.input_flows, enabled)
         if not active:
             return RailResult(is_safe=True)
 
-        rails = {flow: self._run_rail(flow, RailDirection.INPUT, messages) for flow in active}
         if self.input_parallel:
+            rails = {flow: self._run_rail(flow, RailDirection.INPUT, messages) for flow in active}
             return await self._run_rails_parallel(rails, RailDirection.INPUT)
-        return await self._run_rails_sequential(rails, RailDirection.INPUT)
+        return await self._run_rails_sequential_rewriting(active, RailDirection.INPUT, messages, None)
 
     async def is_output_safe(
         self, messages: list[dict], response: str, *, enabled: Union[bool, list[str]] = True
@@ -350,15 +371,18 @@ class RailsManager:
         ``True`` (the default) runs all, ``False`` runs none, and a list runs only the
         named flows (matched on the normalized flow name). When parallel mode is enabled,
         all selected rails run concurrently and the first unsafe result cancels the rest.
+        Sequential mode applies each TRANSFORM to the bot response before the next rail runs.
         """
         active = self._enabled_flows(self.output_flows, enabled)
         if not active:
             return RailResult(is_safe=True)
 
-        rails = {flow: self._run_rail(flow, RailDirection.OUTPUT, messages, bot_response=response) for flow in active}
         if self.output_parallel:
+            rails = {
+                flow: self._run_rail(flow, RailDirection.OUTPUT, messages, bot_response=response) for flow in active
+            }
             return await self._run_rails_parallel(rails, RailDirection.OUTPUT)
-        return await self._run_rails_sequential(rails, RailDirection.OUTPUT)
+        return await self._run_rails_sequential_rewriting(active, RailDirection.OUTPUT, messages, response)
 
     async def are_tool_calls_safe(
         self,
@@ -518,6 +542,40 @@ class RailsManager:
             for _, coro in remaining:
                 coro.close()
 
+    async def _run_rails_sequential_rewriting(
+        self,
+        flows: list[str],
+        direction: RailDirection,
+        messages: list[dict],
+        bot_response: Optional[str],
+    ) -> RailResult:
+        """Run input/output rails in order, feeding each TRANSFORM into the next rail."""
+        req_id = get_request_id()
+        collected: list[RailCallRecord] = []
+        working_messages = messages
+        working_bot = bot_response
+        rewritten_user: Optional[str] = None
+        rewritten_bot: Optional[str] = None
+        for flow in flows:
+            result = await self._run_rail(flow, direction, working_messages, working_bot)
+            collected.extend(result.records)
+            log.debug("[%s] %s flow %s result %s", req_id, direction.value, flow, result)
+            if not result.is_safe:
+                log.info("[%s] %s flow %s blocked", req_id, direction.value, flow)
+                return replace(result, records=tuple(collected))
+            if result.rewritten_user_message is not None:
+                rewritten_user = result.rewritten_user_message
+                working_messages = with_rewritten_user_message(working_messages, rewritten_user)
+            if result.rewritten_bot_message is not None:
+                rewritten_bot = result.rewritten_bot_message
+                working_bot = rewritten_bot
+        return RailResult(
+            is_safe=True,
+            records=tuple(collected),
+            rewritten_user_message=rewritten_user,
+            rewritten_bot_message=rewritten_bot,
+        )
+
     async def _run_rails_parallel(
         self,
         rails: Mapping[str, Coroutine[Any, Any, RailResult]],
@@ -532,6 +590,7 @@ class RailsManager:
         task_order = {task: i for i, task in enumerate(tasks)}
         pending_tasks: set[asyncio.Task] = set(tasks)
         collected: list[RailCallRecord] = []
+        flow_results: dict[str, RailResult] = {}
 
         try:
             while pending_tasks:
@@ -539,8 +598,9 @@ class RailsManager:
                 first_unsafe: Optional[RailResult] = None
                 for task in sorted(done, key=lambda t: task_order[t]):
                     result = task.result()
-                    collected.extend(result.records)
                     flow = task_to_flow[task]
+                    flow_results[flow] = result
+                    collected.extend(result.records)
                     log.debug("[%s] %s flow %s result %s", req_id, direction.value, flow, result)
                     if not result.is_safe and first_unsafe is None:
                         first_unsafe = result
@@ -552,7 +612,20 @@ class RailsManager:
                             t.cancel()
                         await asyncio.wait(pending_tasks)
                     return replace(first_unsafe, records=tuple(collected))
-            return RailResult(is_safe=True, records=tuple(collected))
+            rewritten_user: Optional[str] = None
+            rewritten_bot: Optional[str] = None
+            for flow in rails:
+                result = flow_results[flow]
+                if result.rewritten_user_message is not None:
+                    rewritten_user = result.rewritten_user_message
+                if result.rewritten_bot_message is not None:
+                    rewritten_bot = result.rewritten_bot_message
+            return RailResult(
+                is_safe=True,
+                records=tuple(collected),
+                rewritten_user_message=rewritten_user,
+                rewritten_bot_message=rewritten_bot,
+            )
         except BaseException:
             for t in tasks:
                 if not t.done():

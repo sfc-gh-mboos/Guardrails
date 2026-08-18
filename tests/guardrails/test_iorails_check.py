@@ -94,6 +94,30 @@ class TestCheckAsyncAutoDetect:
         iorails.rails_manager.is_output_safe.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_input_modified(self, iorails):
+        """A user-turn rewrite returns MODIFIED with the rewritten content."""
+        _mock_rails(iorails, input_result=RailResult(is_safe=True, rewritten_user_message="modified input"))
+        messages = [{"role": "user", "content": "modify"}]
+
+        result = await iorails.check_async(messages)
+
+        assert result.status == RailStatus.MODIFIED
+        assert result.content == "modified input"
+        assert result.rail is None
+
+    @pytest.mark.asyncio
+    async def test_output_modified(self, iorails):
+        """A bot-turn rewrite returns MODIFIED with the rewritten assistant content."""
+        _mock_rails(iorails, output_result=RailResult(is_safe=True, rewritten_bot_message="modified output"))
+        messages = [{"role": "assistant", "content": "modify output"}]
+
+        result = await iorails.check_async(messages)
+
+        assert result.status == RailStatus.MODIFIED
+        assert result.content == "modified output"
+        assert result.rail is None
+
+    @pytest.mark.asyncio
     async def test_input_blocked(self, iorails):
         """An unsafe input verdict returns BLOCKED with the refusal message and the blocking rail name."""
         _mock_rails(iorails, input_result=_unsafe("content safety check input"))
