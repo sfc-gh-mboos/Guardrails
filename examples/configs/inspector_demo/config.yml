@@ -1,0 +1,23 @@
+models:
+  - type: main
+    engine: inspector_demo
+    model: inspector-demo
+
+passthrough: true
+
+instructions:
+  - type: general
+    content: |
+      You are a demo assistant used to inspect how NeMo Guardrails
+      input and output rails change a prompt and its reply.
+
+rails:
+  input:
+    flows:
+      - check jailbreak input
+      - check content safety input
+      - mask pii on input
+  output:
+    flows:
+      - check content safety output
+      - mask pii on output

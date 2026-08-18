@@ -32,7 +32,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.exceptions import ExceptionMiddleware
-from starlette.responses import JSONResponse, RedirectResponse, StreamingResponse
+from starlette.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 
 from nemoguardrails import LLMRails, RailsConfig, utils
 from nemoguardrails.exceptions import InvalidStateError, LLMCallException, StreamingNotSupportedError
@@ -52,6 +52,7 @@ from nemoguardrails.server.exception_handlers import (
     model_initialization_error_handler,
     validation_error_handler,
 )
+from nemoguardrails.server.schemas.inspect import InspectRequest, InspectResponse
 from nemoguardrails.server.schemas.openai import (
     GuardrailCheckRequest,
     GuardrailCheckResponse,
@@ -69,6 +70,16 @@ from nemoguardrails.server.schemas.utils import (
     resolve_tool_calls,
     warn_if_thread_history_invalid_for_tool_use,
 )
+
+_INSPECTOR_UI_PATH = os.path.join(os.path.dirname(__file__), "ui", "index.html")
+_INSPECT_OUTPUT_VARS = [
+    "triggered_input_rail",
+    "triggered_output_rail",
+    "allowed",
+    "user_message",
+    "last_user_message",
+    "last_bot_message",
+]
 
 try:
     from chainlit.utils import mount_chainlit as _mount_chainlit
@@ -808,6 +819,110 @@ async def guardrail_check(body: GuardrailCheckRequest, request: Request):
     )
 
 
+def _user_text_from_messages(messages: List[dict]) -> str:
+    for message in reversed(messages):
+        if message.get("role") == "user":
+            content = message.get("content") or ""
+            return content if isinstance(content, str) else str(content)
+    return ""
+
+
+def _dump_model(value: Any) -> Any:
+    if value is None:
+        return None
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    return value
+
+
+@app.get(
+    "/inspect",
+    summary="Open the rail inspector UI.",
+    include_in_schema=True,
+)
+async def inspect_ui():
+    """Serve the static inspector page used to compare prompts with rail impact."""
+    if app.disable_chat_ui:
+        raise HTTPException(status_code=404, detail="Chat UI is disabled.")
+    if not os.path.isfile(_INSPECTOR_UI_PATH):
+        raise HTTPException(status_code=404, detail="Inspector UI is not installed.")
+    return FileResponse(_INSPECTOR_UI_PATH, media_type="text/html")
+
+
+@app.post(
+    "/v1/inspect",
+    response_model=InspectResponse,
+    summary="Inspect rail impact for a prompt.",
+)
+async def inspect_completion(body: InspectRequest, request: Request):
+    """Run a prompt through a config and return input, output, and activated rails.
+
+    Unlike `/v1/chat/completions`, this endpoint does not inject a request `model`
+    into the config, so demo engines such as `inspector_demo` keep their canned LLM.
+    """
+    api_request_headers.set(request.headers)
+
+    config_ids: Optional[List[str]] = [body.config_id] if body.config_id else None
+    if not config_ids:
+        if app.default_config_id:
+            config_ids = [app.default_config_id]
+        elif app.single_config_mode and app.single_config_id:
+            config_ids = [app.single_config_id]
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail="No guardrails config_id provided and server has no default configuration",
+            )
+
+    try:
+        llm_rails = await _get_rails(config_ids)
+    except ValueError as ex:
+        log.exception(ex)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not load the requested guardrails configuration: {config_ids}",
+        )
+
+    original_input = _user_text_from_messages(body.messages)
+    res = await llm_rails.generate_async(
+        messages=body.messages,
+        options={
+            "output_vars": _INSPECT_OUTPUT_VARS,
+            "log": {"activated_rails": True, "llm_calls": True},
+        },
+    )
+
+    bot_message = extract_bot_message_from_response(res)
+    output_text = bot_message.get("content") or ""
+    if not isinstance(output_text, str):
+        output_text = str(output_text)
+
+    output_data = None
+    log_payload: dict[str, Any] = {}
+    if isinstance(res, GenerationResponse):
+        output_data = res.output_data
+        log_payload = _dump_model(res.log) or {}
+
+    output_data = output_data if isinstance(output_data, dict) else {}
+    activated_rails = log_payload.get("activated_rails") or []
+    if not isinstance(activated_rails, list):
+        activated_rails = []
+
+    return InspectResponse(
+        input=original_input,
+        output=output_text,
+        user_message_after_rails=output_data.get("user_message") or output_data.get("last_user_message"),
+        triggered_input_rail=output_data.get("triggered_input_rail"),
+        triggered_output_rail=output_data.get("triggered_output_rail"),
+        allowed=output_data.get("allowed"),
+        activated_rails=activated_rails,
+        stats=log_payload.get("stats"),
+        llm_calls=log_payload.get("llm_calls"),
+        output_data=output_data,
+        config_id=config_ids[0],
+    )
+
+
 # By default, there are no challenges
 challenges = []
 
@@ -941,4 +1056,6 @@ else:
 
     @app.get("/")
     async def root_handler():
+        if os.path.isfile(_INSPECTOR_UI_PATH):
+            return RedirectResponse(url="inspect")
         return {"status": "ok"}

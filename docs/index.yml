@@ -604,6 +604,13 @@ navigation:
               - endpoint: GET /v1/challenges
                 title: List Challenges
                 slug: list-challenges
+          - inspect:
+              - endpoint: GET /inspect
+                title: Open Rail Inspector UI
+                slug: inspect-ui
+              - endpoint: POST /v1/inspect
+                title: Inspect Rail Impact
+                slug: inspect-completion
           - health:
               - endpoint: GET /v1/health
                 title: Health Check

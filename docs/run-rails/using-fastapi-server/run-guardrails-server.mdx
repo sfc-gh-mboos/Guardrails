@@ -226,6 +226,33 @@ For production deployments, disable it using the `--disable-chat-ui` flag.
 
 </Info>
 
+## Rail Inspector
+
+The inspector UI shows the original prompt, the message after input rails, the final reply, and which rails ran, modified, or blocked the turn.
+
+Start the server with the offline demo config (keyword rails and a canned model, no API key):
+
+```bash
+nemoguardrails server --config examples/configs/inspector_demo
+```
+
+Open `http://localhost:8000/inspect`. The page loads an example prompt bank covering a safe question, a jailbreak, a harmful request, PII masking, and an output-rail secret leak.
+
+You can also inspect a prompt over HTTP. This endpoint does not inject a request `model` into the config, so demo engines keep their configured LLM:
+
+```bash
+curl -X POST http://localhost:8000/v1/inspect \
+  -H "Content-Type: application/json" \
+  -d '{
+    "config_id": "inspector_demo",
+    "messages": [{"role": "user", "content": "What is the capital of France?"}]
+  }'
+```
+
+The response includes `input`, `output`, `user_message_after_rails`, `triggered_input_rail`, `triggered_output_rail`, and `activated_rails`.
+
+`--disable-chat-ui` also hides `GET /inspect`. The `POST /v1/inspect` API remains available.
+
 ## Health Check
 
 The server exposes a liveness endpoint at `GET /v1/health` (also available as `GET /healthz`) for orchestrators, load balancers, and container runtimes.
@@ -248,3 +275,4 @@ When the server runs behind a path prefix (`--prefix`), the endpoints are served
 - [Chat with a Guardrailed Model](/run-guardrailed-inference/using-fastapi-server/chat-with-guardrailed-model)
 - [List Guardrail Configurations](/run-guardrailed-inference/using-fastapi-server/list-guardrail-configs)
 - [Create Chat Completion](api:POST/v1/chat/completions)
+- [Inspect Rail Impact](api:POST/v1/inspect)

@@ -22,6 +22,8 @@ tags:
     description: Discover available guardrails configurations.
   - name: Challenges
     description: List registered red teaming challenges.
+  - name: Inspect
+    description: Inspect prompts and see which rails ran, modified, or blocked them.
   - name: Health
     description: Check server health or load the chat UI.
 paths:
@@ -211,6 +213,55 @@ paths:
                     - id: jailbreak-1
                       description: Attempt to bypass safety guardrails.
                       category: jailbreak
+  /inspect:
+    get:
+      operationId: getInspectUi
+      tags:
+        - Inspect
+      summary: Open the rail inspector UI
+      description: |
+        Serve the static inspector page. Hidden when `--disable-chat-ui` is set.
+      responses:
+        "200":
+          description: Inspector HTML page.
+          content:
+            text/html:
+              schema:
+                type: string
+        "404":
+          description: Chat UI is disabled or the inspector page is missing.
+  /v1/inspect:
+    post:
+      operationId: inspectCompletion
+      tags:
+        - Inspect
+      summary: Inspect rail impact for a prompt
+      description: |
+        Run a prompt through a guardrails configuration and return the original
+        input, the final output, and which rails ran, modified, or blocked the
+        turn. Unlike `/v1/chat/completions`, this endpoint does not inject a
+        request `model` into the configuration.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InspectRequest"
+            examples:
+              basic:
+                summary: Inspect a safe prompt
+                value:
+                  config_id: inspector_demo
+                  messages:
+                    - role: user
+                      content: What is the capital of France?
+      responses:
+        "200":
+          description: Inspector payload with rail impact.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspectResponse"
   /v1/health:
     get:
       operationId: getHealth
@@ -501,6 +552,74 @@ components:
           type: object
           nullable: true
           additionalProperties: true
+    InspectRequest:
+      type: object
+      required:
+        - messages
+      properties:
+        messages:
+          type: array
+          minItems: 1
+          description: Chat messages to inspect. Typically a single user message.
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+        config_id:
+          type: string
+          nullable: true
+          description: Guardrails configuration ID. Uses the server default when omitted.
+          example: inspector_demo
+    InspectResponse:
+      type: object
+      required:
+        - input
+        - output
+      properties:
+        input:
+          type: string
+          description: Original user message sent to the inspector.
+        output:
+          type: string
+          description: Final assistant message after rails.
+        user_message_after_rails:
+          type: string
+          nullable: true
+          description: User message after input rails (masked or unchanged).
+        triggered_input_rail:
+          type: string
+          nullable: true
+          description: Name of the input rail that blocked, if any.
+        triggered_output_rail:
+          type: string
+          nullable: true
+          description: Name of the output rail that blocked, if any.
+        allowed:
+          type: boolean
+          nullable: true
+          description: Whether input rails allowed the request through.
+        activated_rails:
+          type: array
+          description: Rails that ran, including decisions and stop flags.
+          items:
+            type: object
+            additionalProperties: true
+        stats:
+          type: object
+          nullable: true
+          additionalProperties: true
+        llm_calls:
+          type: array
+          nullable: true
+          items:
+            type: object
+            additionalProperties: true
+        output_data:
+          type: object
+          nullable: true
+          additionalProperties: true
+        config_id:
+          type: string
+          nullable: true
+          description: Configuration ID used for this inspect call.
     OpenAIModelsList:
       type: object
       required:
