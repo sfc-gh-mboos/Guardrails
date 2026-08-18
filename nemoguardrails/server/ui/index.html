@@ -6,33 +6,42 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>NeMo Guardrails Inspector</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Outfit:wght@450;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #f7f7f4;
-      --fg: #26251e;
-      --fg-muted: rgba(38, 37, 30, 0.6);
-      --accent: #f54e00;
-      --card: #f2f1ed;
-      --card-01: #f0efeb;
-      --card-02: #ebeae5;
-      --card-03: #e6e5e0;
-      --border: #e1e0db;
-      --pass: #1f7a4d;
+      --bg: #eef3f0;
+      --fg: #10231a;
+      --fg-muted: rgba(16, 35, 26, 0.62);
+      --accent: #0b7a45;
+      --accent-strong: #076338;
+      --card: rgba(255, 255, 255, 0.72);
+      --card-01: #f7fbf8;
+      --border: #c9d8cf;
+      --pass: #0b7a45;
       --block: #b42318;
-      --modify: #9a6700;
-      --radius: 12px;
-      --font: "Avenir Next", "Segoe UI", Helvetica, Arial, sans-serif;
+      --modify: #8a5a00;
+      --radius: 14px;
+      --font: "Outfit", "Segoe UI", Helvetica, Arial, sans-serif;
       --mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
     }
     * { box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font-family: var(--font); }
-    body { min-height: 100vh; }
+    html, body { margin: 0; padding: 0; color: var(--fg); font-family: var(--font); }
+    body {
+      min-height: 100vh;
+      background:
+        radial-gradient(1200px 500px at 10% -10%, rgba(11, 122, 69, 0.14), transparent 55%),
+        radial-gradient(900px 420px at 100% 0%, rgba(16, 55, 40, 0.10), transparent 50%),
+        linear-gradient(180deg, #f5faf7 0%, var(--bg) 40%, #e7eee9 100%);
+    }
     header {
       display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
-      padding: 20px 24px 12px; border-bottom: 1px solid var(--border);
+      padding: 28px 24px 16px; border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(8px);
     }
-    h1 { font-size: 20px; font-weight: 650; margin: 0; }
-    .sub { color: var(--fg-muted); font-size: 13px; margin: 4px 0 0; }
+    h1 { font-size: 28px; font-weight: 700; margin: 0; letter-spacing: -0.03em; }
+    .sub { color: var(--fg-muted); font-size: 14px; margin: 6px 0 0; max-width: 54ch; }
     .layout {
       display: grid; grid-template-columns: 320px 1fr; gap: 20px;
       padding: 20px 24px 40px; max-width: 1280px; margin: 0 auto;
@@ -40,22 +49,24 @@
     @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
     .panel {
       background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px;
+      box-shadow: 0 10px 30px rgba(16, 35, 26, 0.04);
     }
-    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 12px; color: var(--fg-muted); }
+    h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 12px; color: var(--fg-muted); }
     .prompt-list { display: flex; flex-direction: column; gap: 8px; }
     button.example {
-      text-align: left; border: 1px solid var(--border); background: var(--card-01);
+      text-align: left; border: 1px solid transparent; background: transparent;
       border-radius: 10px; padding: 10px 12px; cursor: pointer; color: inherit; font: inherit;
+      transition: background 140ms ease, border-color 140ms ease;
     }
     button.example:hover, button.example.active { border-color: var(--accent); background: #fff; }
     .example-name { font-weight: 600; font-size: 14px; }
     .pill {
-      display: inline-block; font-size: 11px; font-weight: 600; border-radius: 999px;
+      display: inline-block; font-size: 11px; font-weight: 600; border-radius: 6px;
       padding: 2px 8px; margin-left: 6px; vertical-align: middle;
     }
-    .pill.pass { background: #e3f5ea; color: var(--pass); }
+    .pill.pass { background: #d9f3e4; color: var(--pass); }
     .pill.input-block, .pill.output-block { background: #fde8e6; color: var(--block); }
-    .pill.input-modify { background: #fff4d6; color: var(--modify); }
+    .pill.input-modify { background: #fff1cc; color: var(--modify); }
     .expected { font-size: 12px; color: var(--fg-muted); margin-top: 4px; }
     textarea {
       width: 100%; min-height: 110px; resize: vertical; border-radius: 10px;
@@ -68,14 +79,17 @@
     }
     .primary {
       background: var(--accent); color: #fff; border-color: var(--accent); cursor: pointer; font-weight: 600;
+      transition: background 140ms ease, transform 140ms ease;
     }
+    .primary:hover { background: var(--accent-strong); }
+    .primary:active { transform: translateY(1px); }
     .primary:disabled { opacity: 0.55; cursor: wait; }
     .status {
       font-weight: 700; font-size: 14px; padding: 8px 12px; border-radius: 8px; margin-bottom: 16px;
     }
-    .status.pass { background: #e3f5ea; color: var(--pass); }
+    .status.pass { background: #d9f3e4; color: var(--pass); }
     .status.blocked { background: #fde8e6; color: var(--block); }
-    .status.modified { background: #fff4d6; color: var(--modify); }
+    .status.modified { background: #fff1cc; color: var(--modify); }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     @media (max-width: 700px) { .grid-2 { grid-template-columns: 1fr; } }
     .box { background: var(--card-01); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
