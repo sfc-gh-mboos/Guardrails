@@ -28,6 +28,8 @@ from nemoguardrails.guardrails.guardrails_types import RailResult
 from nemoguardrails.guardrails.iorails import (
     REFUSAL_MESSAGE,
     STREAM_MAX_CONCURRENCY,
+    STUB_REDACTED_TOKEN,
+    STUB_SECRET_TOKEN,
     IORails,
     _is_stream_error_chunk,
 )
@@ -243,6 +245,26 @@ class TestStreamAsyncNoOutputRails:
         _wire_mocks(iorails_input_only)
         chunks = await _collect(iorails_input_only.stream_async(messages=[{"role": "user", "content": "hi"}]))
         assert "".join(chunks) == "Hello from the streaming LLM! Have a nice day"
+
+    @pytest.mark.asyncio
+    async def test_stub_input_transform_rewrites_secret(self, iorails_input_only):
+        """User SECRET is rewritten before the streaming LLM call."""
+        captured = {}
+
+        async def capturing_stream(model_type, messages, **kwargs):
+            captured["messages"] = messages
+            yield LLMResponseChunk(delta_content="ok")
+
+        _wire_mocks(iorails_input_only, stream=capturing_stream)
+        original = [{"role": "user", "content": f"leak {STUB_SECRET_TOKEN}"}]
+        chunks = await _collect(iorails_input_only.stream_async(messages=original))
+
+        assert "".join(chunks) == "ok"
+        assert original[0]["content"] == f"leak {STUB_SECRET_TOKEN}"
+        assert captured["messages"] == [{"role": "user", "content": f"leak {STUB_REDACTED_TOKEN}"}]
+        iorails_input_only.rails_manager.is_input_safe.assert_called_once_with(
+            [{"role": "user", "content": f"leak {STUB_REDACTED_TOKEN}"}], enabled=True
+        )
 
     @pytest.mark.asyncio
     async def test_input_rails_block(self, iorails_input_only):

@@ -25,7 +25,13 @@ from aiohttp.test_utils import TestServer
 
 from nemoguardrails import Guardrails
 from nemoguardrails.guardrails.guardrails_types import RailDirection, RailResult
-from nemoguardrails.guardrails.iorails import REFUSAL_MESSAGE, IORails
+from nemoguardrails.guardrails.iorails import (
+    REFUSAL_MESSAGE,
+    STUB_REDACTED_TOKEN,
+    STUB_SECRET_TOKEN,
+    IORails,
+    apply_stub_input_transform,
+)
 from nemoguardrails.guardrails.model_engine import ModelEngine
 from nemoguardrails.rails.llm.config import RailsConfig
 from nemoguardrails.rails.llm.options import GenerationOptions, GenerationResponse
@@ -52,6 +58,28 @@ async def iorails(rails_config):
         yield iorails
     finally:
         await iorails.stop()
+
+
+class TestStubInputTransform:
+    """The SECRET → [REDACTED] stub rewrite used on the IORails input path."""
+
+    def test_rewrites_user_secret(self):
+        messages = [{"role": "user", "content": f"keep {STUB_SECRET_TOKEN} hidden"}]
+        assert apply_stub_input_transform(messages) == [
+            {"role": "user", "content": f"keep {STUB_REDACTED_TOKEN} hidden"}
+        ]
+
+    def test_does_not_mutate_caller_messages(self):
+        messages = [{"role": "user", "content": STUB_SECRET_TOKEN}]
+        apply_stub_input_transform(messages)
+        assert messages[0]["content"] == STUB_SECRET_TOKEN
+
+    def test_leaves_assistant_and_non_matching_user_turns(self):
+        messages = [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": STUB_SECRET_TOKEN},
+        ]
+        assert apply_stub_input_transform(messages) is messages
 
 
 class TestIORailsInit:
@@ -221,6 +249,25 @@ class TestGenerateAsync:
         iorails.rails_manager.is_input_safe.assert_called_once_with(messages, enabled=True)
         iorails.engine_registry.model_call.assert_called_once_with("main", messages)
         iorails.rails_manager.is_output_safe.assert_called_once_with(messages, llm_response, enabled=True)
+
+    @pytest.mark.asyncio
+    async def test_stub_input_transform_rewrites_secret_on_iorails_path(self, iorails):
+        """User SECRET is rewritten to [REDACTED] before input rails and the main LLM run."""
+        messages = [{"role": "user", "content": f"the token is {STUB_SECRET_TOKEN}"}]
+        rewritten = [{"role": "user", "content": f"the token is {STUB_REDACTED_TOKEN}"}]
+        llm_response = "ok"
+
+        iorails.rails_manager.is_input_safe = AsyncMock(return_value=RailResult(is_safe=True))
+        iorails.engine_registry.model_call = AsyncMock(return_value=LLMResponse(content=llm_response))
+        iorails.rails_manager.is_output_safe = AsyncMock(return_value=RailResult(is_safe=True))
+
+        result = await iorails.generate_async(messages=messages)
+
+        assert result == {"role": "assistant", "content": llm_response}
+        assert messages[0]["content"] == f"the token is {STUB_SECRET_TOKEN}"
+        iorails.rails_manager.is_input_safe.assert_called_once_with(rewritten, enabled=True)
+        iorails.engine_registry.model_call.assert_called_once_with("main", rewritten)
+        iorails.rails_manager.is_output_safe.assert_called_once_with(rewritten, llm_response, enabled=True)
 
     @pytest.mark.asyncio
     async def test_safe_input_and_output_with_generation_options(self, iorails):
