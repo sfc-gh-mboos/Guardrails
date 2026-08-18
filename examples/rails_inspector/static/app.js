@@ -135,10 +135,8 @@ function renderRails(result) {
         effectCell.append(element("span", `chip ${rail.effect}`, rail.effect));
         row.append(effectCell);
 
-        const why = [rail.reason, rail.detections.length ? `matched: ${rail.detections.join(", ")}` : null]
-            .filter(Boolean)
-            .join(" ");
-        row.append(element("td", null, why || "-"));
+        const matched = rail.detections.length ? `matched: ${rail.detections.join(", ")}` : null;
+        row.append(element("td", null, rail.reason || matched || "-"));
         row.append(element("td", "numeric", rail.duration_ms === null ? "-" : `${rail.duration_ms} ms`));
         railsBody.append(row);
     });

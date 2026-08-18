@@ -16,6 +16,11 @@
     box-sizing: border-box;
 }
 
+/* Class-level `display` rules below would otherwise beat the [hidden] default. */
+[hidden] {
+    display: none !important;
+}
+
 body {
     margin: 0;
     background: var(--bg);

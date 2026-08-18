@@ -1,3 +1,18 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Rails Inspector: a small web UI for seeing what guardrails do to a prompt.
 
 Run it against the bundled offline demo config::
@@ -187,7 +202,9 @@ def _model_output(generation_log: GenerationLog, internal_events: Optional[List[
     # generation-style LLM call, skipping LLM calls made by the rails themselves.
     generation_tasks = {"general", "generate_bot_message"}
     completions = [
-        call.completion for call in (generation_log.llm_calls or []) if call.task in generation_tasks and call.completion
+        call.completion
+        for call in (generation_log.llm_calls or [])
+        if call.task in generation_tasks and call.completion
     ]
     return completions[-1] if completions else None
 
