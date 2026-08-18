@@ -102,6 +102,24 @@ log = logging.getLogger(__name__)
 
 REFUSAL_MESSAGE = "I'm sorry, I can't respond to that."
 
+# Stub input rewrite until IORails can apply catalog TRANSFORM outcomes.
+STUB_SECRET_TOKEN = "SECRET"
+STUB_REDACTED_TOKEN = "[REDACTED]"
+
+
+def apply_stub_input_transform(messages: LLMMessages) -> LLMMessages:
+    """Rewrite SECRET to [REDACTED] on user turns, leaving the caller's list intact."""
+    rewritten: Optional[LLMMessages] = None
+    for index, message in enumerate(messages):
+        content = message.get("content")
+        if message.get("role") != "user" or not isinstance(content, str) or STUB_SECRET_TOKEN not in content:
+            continue
+        if rewritten is None:
+            rewritten = list(messages)
+        rewritten[index] = {**message, "content": content.replace(STUB_SECRET_TOKEN, STUB_REDACTED_TOKEN)}
+    return rewritten if rewritten is not None else messages
+
+
 # Concurrency budgets for the non-streaming AsyncWorkQueue:
 # NONSTREAM_QUEUE_DEPTH      — max pending items before submit raises QueueFull
 # NONSTREAM_MAX_CONCURRENCY  — max concurrent worker tasks draining the queue
@@ -851,7 +869,7 @@ class IORails(BaseGuardrails):
         ``requests.errors{error.type=QueueFull}`` and
         ``nonstream.rejections`` — honest dual-signal reporting.
         """
-        messages = self._convert_to_messages(prompt, messages)
+        messages = apply_stub_input_transform(self._convert_to_messages(prompt, messages))
         await self.start()
         metrics_ctx = request_metrics() if self._metrics_enabled else nullcontext()
         with metrics_ctx:
@@ -1367,6 +1385,7 @@ class IORails(BaseGuardrails):
                 "speculative_generation is not supported for streaming; falling back to sequential",
                 stacklevel=2,
             )
+        messages = apply_stub_input_transform(messages)
         self._validate_streaming_with_output_rails()
 
         if include_metadata and self._has_streaming_output_rails:
