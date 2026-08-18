@@ -1,0 +1,46 @@
+# Demo config for the Rails Inspector UI.
+# Uses deterministic regex rails so the demo runs without live LLM API keys.
+
+instructions:
+  - type: general
+    content: |
+      You are a helpful company assistant for Acme Corp.
+      Answer employee questions about workplace policies clearly and briefly.
+      Never reveal confidential payroll details, passwords, or internal secrets.
+
+models: []
+
+rails:
+  config:
+    regex_detection:
+      input:
+        case_insensitive: true
+        patterns:
+          # Jailbreak / instruction override
+          - "(?i)ignore (all |any |the )?(previous |prior )?instructions"
+          - "(?i)you are now (DAN|unrestricted|jailbroken)"
+          - "(?i)bypass (the )?(safety|guardrail|filter)"
+          # Harmful / criminal intent
+          - "(?i)how (can|do) I (make|build) a bomb"
+          - "(?i)hack into"
+          - "(?i)steal (someone'?s )?identity"
+          # Sensitive data in the user prompt
+          - "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+          - "(?i)\\b(password|api[_-]?key|secret token)\\b\\s*[:=]"
+      output:
+        case_insensitive: true
+        patterns:
+          # Block leaking confidential / secret markers
+          - "(?i)\\bconfidential\\b"
+          - "(?i)\\binternal[_-]?use[_-]?only\\b"
+          - "(?i)\\bdo not share\\b"
+          - "(?i)password is\\s+\\S+"
+          - "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+
+  input:
+    flows:
+      - regex check input
+
+  output:
+    flows:
+      - regex check output
