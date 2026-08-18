@@ -903,7 +903,7 @@ class TestStreamAsyncToolCalling:
             chunk
             async for chunk in iorails_stream_check_first._run_output_rails_in_streaming(
                 streaming_handler=_empty_content_handler(),
-                messages=[{"role": "user", "content": "hi"}],
+                conversation=[[{"role": "user", "content": "hi"}]],
             )
         ]
 
