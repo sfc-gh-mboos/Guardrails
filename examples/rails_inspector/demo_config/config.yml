@@ -1,0 +1,45 @@
+# Offline demo configuration for the Rails Inspector.
+#
+# Every rail in this config is deterministic and runs locally, so the inspector
+# starts with no API keys and no network access. The main model is supplied by
+# the inspector itself (a scripted demo model), which is why `models` is empty.
+# Point the inspector at your own config directory to exercise real models.
+
+models: []
+
+# Send the user message straight to the main model instead of running dialog
+# rails, so the UI shows a clean "input rails -> model -> output rails" path.
+passthrough: True
+
+instructions:
+    - type: general
+      content: |
+          You are a billing support assistant for the fictional company Acme Cloud.
+
+rails:
+    input:
+        flows:
+            - regex check input
+            - check off topic on input
+            - mask sensitive ids on input
+
+    output:
+        flows:
+            - regex check output
+            - mask sensitive ids on output
+
+    config:
+        regex_detection:
+            input:
+                case_insensitive: True
+                patterns:
+                    - "ignore (all |your )*(previous|prior|above) instructions"
+                    - "disregard (all |your )*(previous|prior|above) (instructions|rules)"
+                    - "reveal (your |the )*(system prompt|initial prompt|instructions)"
+                    - "you are now in developer mode"
+            output:
+                case_insensitive: False
+                patterns:
+                    # Credential-shaped strings must never reach the user.
+                    - "sk-[A-Za-z0-9-]{16,}"
+                    - "AKIA[0-9A-Z]{16}"

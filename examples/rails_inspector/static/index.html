@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>NeMo Guardrails Rails Inspector</title>
+        <link rel="stylesheet" href="/static/styles.css" />
+    </head>
+    <body>
+        <header class="topbar">
+            <div>
+                <h1>Rails Inspector</h1>
+                <p class="subtitle">See what the guardrails do to a prompt, before and after the model.</p>
+            </div>
+            <dl class="config-summary" id="config-summary"></dl>
+        </header>
+
+        <main class="layout">
+            <aside class="sidebar">
+                <section>
+                    <h2>Example prompts</h2>
+                    <div id="prompt-bank" class="prompt-bank"></div>
+                </section>
+                <section>
+                    <h2>Configured rails</h2>
+                    <div id="rails-summary" class="rails-summary"></div>
+                </section>
+            </aside>
+
+            <section class="workspace">
+                <form id="run-form" class="composer">
+                    <label class="visually-hidden" for="prompt">Prompt</label>
+                    <textarea
+                        id="prompt"
+                        name="prompt"
+                        rows="3"
+                        placeholder="Type a prompt, or pick one from the bank on the left."
+                        required
+                    ></textarea>
+                    <div class="composer-actions">
+                        <span class="hint">Ctrl / Cmd + Enter to run</span>
+                        <button type="submit" id="run-button">Run through rails</button>
+                    </div>
+                </form>
+
+                <div id="status" class="status" hidden></div>
+                <div id="result" class="result" hidden>
+                    <div id="verdict" class="verdict"></div>
+
+                    <ol id="pipeline" class="pipeline"></ol>
+
+                    <section class="panel">
+                        <h2>Rails that ran</h2>
+                        <table class="rails-table">
+                            <thead>
+                                <tr>
+                                    <th>Stage</th>
+                                    <th>Rail</th>
+                                    <th>Effect</th>
+                                    <th>Why</th>
+                                    <th class="numeric">Time</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rails-body"></tbody>
+                        </table>
+                        <p id="stats" class="stats"></p>
+                    </section>
+
+                    <details class="panel">
+                        <summary>Raw response</summary>
+                        <pre id="raw-json"></pre>
+                    </details>
+                </div>
+            </section>
+        </main>
+
+        <script src="/static/app.js"></script>
+    </body>
+</html>
