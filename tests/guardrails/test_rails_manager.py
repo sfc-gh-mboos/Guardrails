@@ -72,12 +72,25 @@ MESSAGES = [{"role": "user", "content": "hello"}]
 
 
 class _FixedRail:
-    """Stands in for a CompiledRail, answering with one outcome and making no model call."""
+    """A stand-in CompiledRail that returns a fixed outcome without calling an action."""
 
     def __init__(self, outcome: RailOutcome) -> None:
         self._outcome = outcome
 
     async def execute(self, messages, bot_response=None) -> RailExecution:
+        return RailExecution(outcome=self._outcome)
+
+
+class _RecordingRail:
+    """Records the user turn and bot response each call, then returns a fixed outcome."""
+
+    def __init__(self, outcome: RailOutcome) -> None:
+        self._outcome = outcome
+        self.seen: list[tuple[object, object]] = []
+
+    async def execute(self, messages, bot_response=None) -> RailExecution:
+        user = messages[-1].get("content") if messages else None
+        self.seen.append((user, bot_response))
         return RailExecution(outcome=self._outcome)
 
 
@@ -1138,14 +1151,90 @@ class TestOutcomeToResult:
         assert result.is_safe is is_safe
         assert result.return_value == {"allowed": is_safe}
 
-    def test_a_transform_raises_rather_than_reading_as_allowed(self):
-        """A rewrite IORails cannot apply fails loudly instead of allowing and discarding it."""
-        # Transform surfaces are refused at compile time, so this is a tripwire for the PR
-        # that implements them rather than a path a config can reach.
-        outcome = RailOutcome.transform([(TransformTarget.USER_MESSAGE, "masked")])
+    def test_a_user_message_transform_is_safe_and_carries_the_rewrite(self):
+        """A rewrite IORails can apply is an allow plus the new user-turn text."""
+        outcome = RailOutcome.transform(
+            [(TransformTarget.USER_MESSAGE, "masked")],
+            metadata={"text": "secret original", "masked_text": "masked"},
+        )
 
-        with pytest.raises(NotImplementedError, match="transform"):
+        result = _rail_result(outcome)
+
+        assert result.is_safe is True
+        assert result.rewritten_user_message == "masked"
+        assert result.rewritten_bot_message is None
+        assert result.return_value == {"allowed": True, "transforms": {"user_message": "masked"}}
+        assert "secret original" not in str(result.return_value)
+
+    def test_a_retrieval_transform_still_raises(self):
+        """A rewrite IORails cannot apply fails loudly instead of allowing and discarding it."""
+        outcome = RailOutcome.transform([(TransformTarget.RELEVANT_CHUNKS, "")])
+
+        with pytest.raises(NotImplementedError, match="relevant_chunks"):
             _rail_result(outcome)
+
+
+class TestSequentialTransformApplication:
+    """Sequential input/output rails feed each TRANSFORM into the next rail."""
+
+    @pytest.mark.asyncio
+    async def test_later_input_rail_sees_the_rewritten_user_turn(self, content_safety_rails_manager):
+        """The second input rail is handed the rewritten user text, not the original."""
+        first = _RecordingRail(RailOutcome.transform([(TransformTarget.USER_MESSAGE, "rewritten")]))
+        second = _RecordingRail(RailOutcome.allow())
+        manager = content_safety_rails_manager
+        manager.input_flows = ["first", "second"]
+        manager.input_parallel = False
+        manager._rails[(RailDirection.INPUT, "first")] = first
+        manager._rails[(RailDirection.INPUT, "second")] = second
+
+        result = await manager.is_input_safe([{"role": "user", "content": "original"}])
+
+        assert result.is_safe
+        assert result.rewritten_user_message == "rewritten"
+        assert first.seen == [("original", None)]
+        assert second.seen == [("rewritten", None)]
+
+    @pytest.mark.asyncio
+    async def test_later_output_rail_sees_the_rewritten_bot_message(self, content_safety_rails_manager):
+        """The second output rail is handed the rewritten bot text, not the original."""
+        first = _RecordingRail(RailOutcome.transform([(TransformTarget.BOT_MESSAGE, "redacted")]))
+        second = _RecordingRail(RailOutcome.allow())
+        manager = content_safety_rails_manager
+        manager.output_flows = ["first", "second"]
+        manager.output_parallel = False
+        manager._rails[(RailDirection.OUTPUT, "first")] = first
+        manager._rails[(RailDirection.OUTPUT, "second")] = second
+        messages = [{"role": "user", "content": "hi"}]
+
+        result = await manager.is_output_safe(messages, "secret")
+
+        assert result.is_safe
+        assert result.rewritten_bot_message == "redacted"
+        assert first.seen == [("hi", "secret")]
+        assert second.seen == [("hi", "redacted")]
+
+
+class TestParallelTransformApplication:
+    """Parallel input/output rails all see the original text; the last rewrite in config order wins."""
+
+    @pytest.mark.asyncio
+    async def test_parallel_input_rails_all_see_the_original_and_last_rewrite_wins(self, content_safety_rails_manager):
+        """Concurrent input rails are not chained; config order decides which rewrite is kept."""
+        first = _RecordingRail(RailOutcome.transform([(TransformTarget.USER_MESSAGE, "from-first")]))
+        second = _RecordingRail(RailOutcome.transform([(TransformTarget.USER_MESSAGE, "from-second")]))
+        manager = content_safety_rails_manager
+        manager.input_flows = ["first", "second"]
+        manager.input_parallel = True
+        manager._rails[(RailDirection.INPUT, "first")] = first
+        manager._rails[(RailDirection.INPUT, "second")] = second
+
+        result = await manager.is_input_safe([{"role": "user", "content": "original"}])
+
+        assert result.is_safe
+        assert result.rewritten_user_message == "from-second"
+        assert first.seen == [("original", None)]
+        assert second.seen == [("original", None)]
 
 
 class TestRailCallRecordNaming:

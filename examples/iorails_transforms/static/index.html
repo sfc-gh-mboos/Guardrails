@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>IORails transform playground</title>
+    <style>
+      :root {
+        --bg: #14120b;
+        --fg: #edecec;
+        --muted: rgba(237, 236, 236, 0.6);
+        --accent: #f54e00;
+        --card: #1b1913;
+        --card-02: #201e18;
+        --ok: #7dce82;
+        --warn: #f0c14b;
+        --mod: #7eb6ff;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        background:
+          radial-gradient(ellipse 80% 50% at 10% -10%, rgba(245, 78, 0, 0.18), transparent),
+          var(--bg);
+        color: var(--fg);
+        line-height: 1.45;
+      }
+      main {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 32px 20px 64px;
+      }
+      h1 {
+        font-family: Georgia, serif;
+        font-size: 1.75rem;
+        margin: 0 0 8px;
+        letter-spacing: -0.02em;
+      }
+      p.lead { color: var(--muted); margin: 0 0 24px; max-width: 46rem; }
+      form, .card {
+        background: var(--card);
+        border: 1px solid #2b2923;
+        border-radius: 12px;
+        padding: 20px;
+      }
+      form { display: grid; gap: 16px; }
+      label { display: grid; gap: 6px; font-size: 0.9rem; color: var(--muted); }
+      textarea, select, input {
+        background: var(--card-02);
+        color: var(--fg);
+        border: 1px solid #2b2923;
+        border-radius: 8px;
+        padding: 10px 12px;
+        font: inherit;
+      }
+      textarea { min-height: 90px; resize: vertical; }
+      .row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+      @media (max-width: 720px) { .row { grid-template-columns: 1fr; } }
+      button, .case {
+        background: var(--accent);
+        color: #fff;
+        border: 0;
+        border-radius: 8px;
+        padding: 10px 16px;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.5; cursor: wait; }
+      .cases { display: flex; flex-wrap: wrap; gap: 8px; }
+      .case {
+        background: #26241e;
+        color: var(--fg);
+        font-weight: 500;
+        font-size: 0.85rem;
+      }
+      .case.active { outline: 2px solid var(--accent); }
+      .hint { font-size: 0.85rem; color: var(--muted); margin: 0; }
+      .results { margin-top: 24px; display: grid; gap: 16px; }
+      .card h2 { margin: 0 0 10px; font-size: 1rem; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      .badge {
+        display: inline-block;
+        font-size: 0.75rem;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: #26241e;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .badge.ok { color: var(--ok); }
+      .badge.warn { color: var(--warn); }
+      .badge.mod { color: var(--mod); }
+      .fields { display: grid; gap: 10px; margin-top: 8px; }
+      .field label {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--muted);
+      }
+      .field pre {
+        margin: 4px 0 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: var(--card-02);
+        padding: 12px;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .error { color: #ff8a80; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .agree, .disagree {
+        padding: 10px 14px;
+        border-radius: 8px;
+        margin: 0;
+      }
+      .agree {
+        background: rgba(125, 206, 130, 0.12);
+        border: 1px solid rgba(125, 206, 130, 0.35);
+        color: var(--ok);
+      }
+      .disagree {
+        background: rgba(240, 193, 75, 0.12);
+        border: 1px solid rgba(240, 193, 75, 0.35);
+        color: var(--warn);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>IORails transform playground</h1>
+      <p class="lead">
+        Same catalog rails and <code>SECRET → [REDACTED]</code> stub as the
+        cross-engine tests. Compare <code>LLMRails</code> and <code>IORails</code>
+        on <code>check()</code> or <code>generate()</code>. Engine agreement uses
+        check status/content and generate assistant text;
+        <code>prompt_sent_to_model</code> is IORails-only and is shown, not compared.
+      </p>
+
+      <form id="form">
+        <div>
+          <label>Automated test cases</label>
+          <div id="cases" class="cases"></div>
+        </div>
+        <label>
+          Text
+          <textarea name="text" id="text">my token is SECRET</textarea>
+        </label>
+        <div class="row">
+          <label>
+            Surface
+            <select name="mode" id="mode">
+              <option value="input">Input rewrite</option>
+              <option value="output">Output rewrite</option>
+              <option value="both">Input + output (generate only)</option>
+            </select>
+          </label>
+          <label>
+            API
+            <select name="api" id="api">
+              <option value="check">check()</option>
+              <option value="generate">generate()</option>
+              <option value="stream">stream() (IORails)</option>
+            </select>
+          </label>
+          <label>
+            Engine
+            <select name="engine" id="engine">
+              <option value="both">Both engines</option>
+              <option value="iorails">IORails only</option>
+              <option value="llmrails">LLMRails only</option>
+            </select>
+          </label>
+        </div>
+        <label>
+          Fake main-model reply (generate / output)
+          <input name="bot_stub" id="bot_stub" value="here is SECRET" />
+        </label>
+        <p class="hint" id="expect">
+          Input check() rewrites the user text. Output check() treats the text as
+          the assistant turn. generate() calls a stub main model, then applies
+          output rails to that reply.
+        </p>
+        <p class="hint" id="tests"></p>
+        <button type="submit">Run</button>
+      </form>
+
+      <div id="results" class="results"></div>
+    </main>
+    <script>
+      const form = document.getElementById("form");
+      const results = document.getElementById("results");
+      let cases = [];
+
+      function esc(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;");
+      }
+
+      function field(label, value) {
+        if (value == null || value === "") return "";
+        return `<div class="field"><label>${esc(label)}</label><pre>${esc(value)}</pre></div>`;
+      }
+
+      function statusBadge(status) {
+        if (!status) return "";
+        const cls = status === "modified" ? "mod" : status === "blocked" ? "warn" : "ok";
+        return `<span class="badge ${cls}">${esc(status)}</span>`;
+      }
+
+      function engineCard(item) {
+        const title = esc(item.engine);
+        if (item.api === "check") {
+          return `<section class="card"><h2>${title}${statusBadge(item.status)}</h2>
+            <div class="fields">${field("Returned content", item.content)}${field("Blocking rail", item.rail)}</div>
+          </section>`;
+        }
+        if (item.api === "stream") {
+          return `<section class="card"><h2>${title} stream</h2>
+            <div class="fields">
+              ${field("Submitted user text", item.submitted)}
+              ${field("Prompt sent to main model", item.prompt_sent_to_model)}
+              ${field("Input rewritten", item.input_rewritten)}
+              ${field("Joined chunks", item.joined)}
+              ${field("Chunks still contain SECRET", item.output_chunks_still_contain_secret)}
+            </div>
+          </section>`;
+        }
+        return `<section class="card"><h2>${title} generate</h2>
+          <div class="fields">
+            ${field("Submitted user text", item.submitted)}
+            ${field("Prompt sent to main model", item.prompt_sent_to_model)}
+            ${field("Assistant response (after output rails)", item.assistant_response)}
+          </div>
+        </section>`;
+      }
+
+      function selectCase(item, button) {
+        document.querySelectorAll(".case").forEach((el) => el.classList.remove("active"));
+        button.classList.add("active");
+        document.getElementById("text").value = item.text;
+        document.getElementById("mode").value = item.mode;
+        document.getElementById("api").value = item.api;
+        document.getElementById("bot_stub").value = item.bot_stub;
+        document.getElementById("engine").value = item.api === "stream" ? "iorails" : "both";
+        document.getElementById("expect").textContent = "Expect: " + item.expect;
+        document.getElementById("tests").innerHTML =
+          "Tests: " + item.tests.map((name) => `<code>${esc(name)}</code>`).join("<br>");
+      }
+
+      async function loadCases() {
+        const data = await fetch("/api/cases").then((r) => r.json());
+        cases = data.cases;
+        const root = document.getElementById("cases");
+        root.innerHTML = "";
+        cases.forEach((item, index) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "case";
+          button.textContent = item.label;
+          button.onclick = () => selectCase(item, button);
+          root.appendChild(button);
+          if (index === 0) selectCase(item, button);
+        });
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const data = Object.fromEntries(new FormData(form));
+        const button = form.querySelector("button[type=submit]");
+        button.disabled = true;
+        results.innerHTML = '<p class="hint">Running…</p>';
+        try {
+          const res = await fetch("/api/compare", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          });
+          const json = await res.json();
+          if (!res.ok) {
+            results.innerHTML = `<p class="error">${esc(json.detail || JSON.stringify(json))}</p>`;
+            return;
+          }
+          const agreement = json.agreement;
+          const meta = `<section class="card"><h2>Request
+            ${json.can_handle ? '<span class="badge ok">IORails can_handle</span>' : '<span class="badge warn">fallback</span>'}
+            </h2>
+            <div class="fields">
+              ${field("API", json.api)}
+              ${field("Mode", json.mode)}
+              ${field("Submitted messages", JSON.stringify(json.messages, null, 2))}
+              ${field("Bot stub", json.bot_stub)}
+            </div>
+            ${
+              agreement
+                ? agreement.equal
+                  ? `<p class="agree">Engines agree on ${esc(agreement.compared.join(", "))}.</p>`
+                  : `<p class="disagree">Engines disagree on ${esc(agreement.compared.join(", "))}.</p>`
+                : json.api === "stream"
+                  ? '<p class="hint">Streaming is IORails-only. Confirm prompt_sent_to_model is redacted and joined chunks still contain SECRET.</p>'
+                  : ""
+            }
+          </section>`;
+          results.innerHTML = meta + json.results.map(engineCard).join("");
+        } catch (err) {
+          results.innerHTML = `<p class="error">${esc(err)}</p>`;
+        } finally {
+          button.disabled = false;
+        }
+      });
+
+      loadCases();
+    </script>
+  </body>
+</html>
