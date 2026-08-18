@@ -1,0 +1,30 @@
+define bot refuse to respond
+  "I'm sorry, I can't respond to that."
+
+define bot refuse off topic
+  "I can only help with Acme Cloud billing and account questions."
+
+
+define subflow check off topic on input
+  """Keep the assistant on billing and account topics."""
+  $result = execute check_off_topic(text=$user_message)
+
+  if $result.is_blocked
+    bot refuse off topic
+    stop
+
+
+define subflow mask sensitive ids on input
+  """Mask card, account, and email identifiers before the model sees them."""
+  $result = execute mask_sensitive_ids(source="input", text=$user_message)
+
+  if $result.is_transform
+    $user_message = $result.transform_text["user_message"]
+
+
+define subflow mask sensitive ids on output
+  """Mask card, account, and email identifiers before the user sees them."""
+  $result = execute mask_sensitive_ids(source="output", text=$bot_message)
+
+  if $result.is_transform
+    $bot_message = $result.transform_text["bot_message"]
