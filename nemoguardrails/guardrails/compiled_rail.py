@@ -29,12 +29,13 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional
 
-from nemoguardrails.actions.rail_outcome import RailOutcome, require_rail_outcome
+from nemoguardrails.actions.rail_outcome import RailOutcome, TransformTarget, require_rail_outcome
 from nemoguardrails.guardrails.guardrails_types import LLMMessages
 from nemoguardrails.guardrails.rail_guard import rail_error_outcome
 from nemoguardrails.guardrails.telemetry import action_span
 from nemoguardrails.logging.processing_log import processing_log_var
 from nemoguardrails.manifests import (
+    Binding,
     RailDirection,
     RailSurface,
     default_rail_catalog,
@@ -142,6 +143,20 @@ def _last_user_content(messages: LLMMessages) -> str:
     return "" if index is None else messages[index]["content"]
 
 
+def with_rewritten_user_message(messages: LLMMessages, text: str) -> LLMMessages:
+    """Return a copy of *messages* with the checked user turn rewritten to *text*.
+
+    The caller's list and its message dicts are left unchanged. With no user turn to
+    rewrite, the copy is identical to the input.
+    """
+    rewritten = [dict(message) for message in messages]
+    index = _current_turn_index(rewritten)
+    if index is None:
+        return rewritten
+    rewritten[index]["content"] = text
+    return rewritten
+
+
 def _llm_calls_from(sink: list[dict[str, Any]]) -> tuple["LLMCallInfo", ...]:
     """Pull the LLMCallInfo records out of a processing-log sink."""
     return tuple(entry["data"] for entry in sink if entry.get("type") == "llm_call_info")
@@ -168,11 +183,13 @@ class CompiledRail:
         deps: RailDependencies,
         accepted: frozenset[str],
         http_client: Any = None,
+        context_bindings: tuple[Binding, ...] = (),
     ) -> None:
         """Store the frozen execution plan. Build through :func:`compile_rail`.
 
         *accepted* is passed in rather than recomputed, so the set the bindings were validated
-        against is by construction the one injection filters on.
+        against is by construction the one injection filters on. *context_bindings* are filled
+        per request from the injected context dict, not frozen here.
         """
         self.flow = flow
         self.surface = surface
@@ -181,6 +198,7 @@ class CompiledRail:
         self._deps = deps
         self._accepted = accepted
         self._http_client = http_client
+        self._context_bindings = context_bindings
 
     @property
     def surface_name(self) -> str:
@@ -213,13 +231,22 @@ class CompiledRail:
 
     def _call_kwargs(self, messages: LLMMessages, bot_response: Optional[str]) -> dict[str, Any]:
         """Assemble the action's arguments from its declared parameters and the manifest."""
-        kwargs = {
-            name: value
-            for name, value in self._request_dependencies(messages, bot_response).items()
-            if name in self._accepted
-        }
+        request = self._request_dependencies(messages, bot_response)
+        kwargs = {name: value for name, value in request.items() if name in self._accepted}
         for bound in self._bound:
             kwargs[bound.action_param] = bound.value
+        context = request["context"]
+        for binding in self._context_bindings:
+            key = binding.key
+            if key is None:
+                continue
+            if key in context:
+                kwargs[binding.action_param] = context[key]
+            elif binding.required:
+                raise RuntimeError(
+                    f"{self.flow!r} required context binding {binding.action_param!r} "
+                    f"from {key!r}, which this request did not supply"
+                )
         return kwargs
 
     def _request_dependencies(self, messages: LLMMessages, bot_response: Optional[str]) -> dict[str, Any]:
@@ -305,17 +332,32 @@ def _bind_parameters(surface: RailSurface, params: Mapping[str, str], flow: str)
                 raise RailCompilationError(f"{flow!r} is missing required parameter ${key}=")
             continue
 
-        # Context bindings are refused by _unfillable_bindings_reason before this
-        # point. Raise here for noisy visibility
+        if binding.kind == "context":
+            # Filled per request in CompiledRail._call_kwargs from the injected context dict.
+            continue
+
         raise RailCompilationError(
             f"{flow!r} declares an unsupported {binding.kind!r} binding for {binding.action_param!r}"
         )
     return tuple(bound)
 
 
+# Context keys request-time injection can fill. ``relevant_chunks`` has no source on IORails.
+_FILLABLE_CONTEXT_KEYS = frozenset({"user_message", "bot_message"})
+
+# Transform targets IORails can write back onto the conversation. Retrieval rewrites stay refused.
+_APPLYABLE_TRANSFORM_TARGETS = frozenset({TransformTarget.USER_MESSAGE, TransformTarget.BOT_MESSAGE})
+
+
 def _unfillable_bindings_reason(surface: RailSurface) -> Optional[str]:
     """Report a binding kind request-time injection cannot fill."""
-    unfillable = sorted({binding.action_param for binding in surface.bindings if binding.kind == "context"})
+    unfillable = sorted(
+        {
+            binding.action_param
+            for binding in surface.bindings
+            if binding.kind == "context" and (binding.key or "") not in _FILLABLE_CONTEXT_KEYS
+        }
+    )
     if not unfillable:
         return None
     return (
@@ -325,10 +367,11 @@ def _unfillable_bindings_reason(surface: RailSurface) -> Optional[str]:
 
 
 def _transform_target_reason(surface: RailSurface) -> Optional[str]:
-    """Report a surface that rewrites content, which IORails cannot apply yet."""
-    if surface.transform_target is None:
+    """Report a rewrite IORails cannot apply, such as a retrieval-chunk transform."""
+    target = surface.transform_target
+    if target is None or target in _APPLYABLE_TRANSFORM_TARGETS:
         return None
-    return f"transforms {surface.transform_target.value!r}"
+    return f"transforms {target.value!r}"
 
 
 # Surfaces whose actions read retrieval evidence out of the request context: ``relevant_chunks``,
@@ -354,8 +397,8 @@ def _retrieval_context_reason(surface: RailSurface) -> Optional[str]:
     return "needs retrieval evidence, which manifest-driven execution does not supply yet"
 
 
-# Ordered so the cheapest, most structural check reports first. Each entry is removed by the
-# work that lifts its limitation: context bindings in PR 4, transforms in PR 5.
+# Ordered so the cheapest, most structural check reports first. Retrieval-only limitations
+# stay here; user/bot context bindings and input/output transforms are filled at request time.
 _SURFACE_SUPPORT_CHECKS: tuple[Callable[[RailSurface], Optional[str]], ...] = (
     _transform_target_reason,
     _unfillable_bindings_reason,
@@ -395,7 +438,16 @@ def _reject_unaccepted_bindings(
     if _accepts_arbitrary_keywords(action):
         return
 
-    unaccepted = sorted(param.action_param for param in bound if param.action_param not in accepted)
+    unaccepted = sorted(
+        {
+            *(param.action_param for param in bound if param.action_param not in accepted),
+            *(
+                binding.action_param
+                for binding in surface.bindings
+                if binding.kind == "context" and binding.action_param not in accepted
+            ),
+        }
+    )
     if not unaccepted:
         return
     raise RailCompilationError(
@@ -448,6 +500,7 @@ def compile_rail(
 
     accepted = _accepted_parameters(action)
     bound = _bind_parameters(surface, params, flow)
+    context_bindings = tuple(binding for binding in surface.bindings if binding.kind == "context")
     _reject_unaccepted_bindings(surface, action, bound, accepted, flow)
 
     return CompiledRail(
@@ -458,4 +511,5 @@ def compile_rail(
         deps=deps,
         accepted=accepted,
         http_client=http_client,
+        context_bindings=context_bindings,
     )
