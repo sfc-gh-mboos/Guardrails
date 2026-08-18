@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rails Inspector · NeMo Guardrails</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="top">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true"></div>
+          <div>
+            <p class="eyebrow">NeMo Guardrails</p>
+            <h1>Rails Inspector</h1>
+          </div>
+        </div>
+        <p class="lede">
+          Run example prompts through input and output rails. Compare the candidate
+          reply with the final response and see which rails fired.
+        </p>
+        <div id="health" class="health" data-state="loading">Checking engine…</div>
+      </header>
+
+      <main class="layout">
+        <aside class="bank" aria-label="Example prompts">
+          <div class="panel-head">
+            <h2>Prompt bank</h2>
+            <p>Click an example to load it. Categories show the expected rail outcome.</p>
+          </div>
+          <div class="filters" role="tablist" aria-label="Filter prompts">
+            <button type="button" class="filter is-active" data-filter="all">All</button>
+            <button type="button" class="filter" data-filter="pass">Pass</button>
+            <button type="button" class="filter" data-filter="input-blocked">Input blocked</button>
+            <button type="button" class="filter" data-filter="output-blocked">Output blocked</button>
+          </div>
+          <ul id="prompt-list" class="prompt-list"></ul>
+        </aside>
+
+        <section class="workspace" aria-label="Inspect prompts">
+          <form id="inspect-form" class="composer">
+            <label class="field">
+              <span>User input</span>
+              <textarea id="user-input" rows="4" required placeholder="Type a prompt or pick one from the bank…"></textarea>
+            </label>
+            <label class="field">
+              <span>Candidate assistant output</span>
+              <textarea
+                id="assistant-input"
+                rows="4"
+                placeholder="Optional. Leave blank to auto-draft a deterministic demo reply."
+              ></textarea>
+            </label>
+            <div class="form-row">
+              <label class="check">
+                <input type="checkbox" id="use-demo-reply" checked />
+                <span>Auto-draft demo reply when assistant output is empty</span>
+              </label>
+              <button type="submit" id="run-btn" class="primary">Inspect rails</button>
+            </div>
+            <p id="expected" class="expected" hidden></p>
+          </form>
+
+          <section id="results" class="results" hidden>
+            <div class="outcome-banner" id="outcome-banner"></div>
+
+            <div class="compare">
+              <article class="pane">
+                <h3>Input</h3>
+                <pre id="input-view" class="blob"></pre>
+              </article>
+              <article class="pane">
+                <h3>Candidate output</h3>
+                <pre id="candidate-view" class="blob"></pre>
+              </article>
+              <article class="pane">
+                <h3>Final response</h3>
+                <pre id="final-view" class="blob"></pre>
+              </article>
+            </div>
+
+            <div class="rails-panel">
+              <div class="panel-head">
+                <h3>Rails impact</h3>
+                <p id="rails-meta"></p>
+              </div>
+              <div id="rails-list" class="rails-list"></div>
+            </div>
+
+            <details class="raw">
+              <summary>Raw API payload</summary>
+              <pre id="raw-view" class="blob"></pre>
+            </details>
+          </section>
+        </section>
+      </main>
+    </div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
